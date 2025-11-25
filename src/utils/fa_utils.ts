@@ -1,16 +1,21 @@
 import axios from "axios";
 import JSZip from "jszip";
 
+import {
+  ACTIONS,
+  CAMERA,
+  LIGHTING,
+  LOCATIONS,
+  QUALITY,
+} from "@/constants/prompts";
 import { addErrorLog } from "@/services/error_logs_service";
 
 interface CreateDatasetZipOptions {
   imageUrls: string[];
-  triggerPhrase?: string;
 }
 
 export const createTrainingZip = async ({
   imageUrls,
-  triggerPhrase,
 }: CreateDatasetZipOptions): Promise<Blob> => {
   try {
     const zip = new JSZip();
@@ -54,4 +59,10 @@ export const createTrainingZip = async ({
 
     throw error;
   }
+};
+
+export const generateRandomPrompt = (subject: string, category: string) => {
+  const random = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)];
+
+  return `${subject}, ${random(ACTIONS[category])}, ${random(LOCATIONS[category])}, ${random(LIGHTING)}, ${random(CAMERA)}, ${random(QUALITY)}.`;
 };

@@ -22,7 +22,7 @@ const trainModel = AsyncHandler.handle(async (req, res) => {
   const imagesBlob = await createTrainingZip({ imageUrls: images });
 
   // Train model
-  const requestId = await handleTrainModel(imagesBlob);
+  const requestId = await handleTrainModel(imagesBlob, name);
 
   // Add model info to DB
   const model = await addModel({

@@ -6,11 +6,12 @@ import { addErrorLog } from "./error_logs_service";
 
 fal.config({ credentials: AppConstants.falApiKey });
 
-export const handleTrainModel = async (datasetUrl: Blob) => {
+export const handleTrainModel = async (datasetUrl: Blob, name: string) => {
   try {
     // Build input object
     const input = {
       image_data_url: datasetUrl,
+      trigger_phrase: `TOK ${name}`,
     };
 
     // Submit job — check if SDK supports training endpoint
@@ -43,6 +44,12 @@ export const handleGenerateImage = async (prompt: string, path: string) => {
         loras: [{ path }],
         num_images: 1,
         output_format: "jpeg",
+        image_size: {
+          width: 820,
+          height: 1024,
+        }, // 4:5 ratio
+        negative_prompt:
+          "blurry, low resolution, low quality, watermark, logo, text, cropped, out of frame, ugly face, cartoon, 3d, illustration, anime, multiple body parts",
       },
       webhookUrl: `${AppConstants.serverBaseUrl}/webhook/fal/generation-result`,
     });

@@ -6,8 +6,8 @@ import { getModelById } from "@/services/model_service";
 import { getStyleById } from "@/services/style_service";
 import { updateUser } from "@/services/user_service";
 import { EGenerationStatus } from "@/types/generation";
-import { getRandomItemFromList } from "@/utils/app_utils";
 import errorResponse from "@/utils/errors/errorResponse";
+import { generateRandomPrompt } from "@/utils/fa_utils";
 import { generateImageSchema } from "@/utils/validation/generation_validation_schema";
 
 const createImage = AsyncHandler.handle(async (req, res) => {
@@ -33,13 +33,13 @@ const createImage = AsyncHandler.handle(async (req, res) => {
   }
 
   const group_id = Date.now();
+  const subject = style.base_prompt.replaceAll(
+    "[TRIGGER_WORD]",
+    `TOK ${model.name}`,
+  );
   const generations = await Promise.all(
     Array.from({ length: numberOfImages }).map(async (_, i) => {
-      // const prompt = getRandomItemFromList(style.prompts);
-
-      const prompt =
-        "TOK as a brave army officer standing confidently on a battlefield, wearing a detailed military uniform with realistic textures, badges and gear. Dusty lighting, flying embers in the air, dramatic war-zone atmosphere with smoke and depth. Strong heroic pose, intense expression, cinematic depth of field, ultra-sharp focus, 8K hyper-realistic war photography style, masterpiece quality.";
-
+      const prompt = generateRandomPrompt(subject, style.category);
       const requestId = await handleGenerateImage(prompt, model.model_path);
 
       return addGeneration({

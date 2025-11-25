@@ -11,4 +11,5 @@ export interface IStyle {
   category: string;
   image: string;
   prompts: string[];
+  base_prompt: string;
 }
