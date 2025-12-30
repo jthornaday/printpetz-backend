@@ -5,7 +5,7 @@ import { addModel } from "@/services/model_service";
 import { updateUser } from "@/services/user_service";
 import { EModelStatus } from "@/types/model";
 import errorResponse from "@/utils/errors/errorResponse";
-import { createTrainingZip } from "@/utils/fa_utils";
+import { createTrainingZip } from "@/utils/fal_utils";
 import { modelTrainingSchema } from "@/utils/validation/model_training_validation_schema";
 
 const trainModel = AsyncHandler.handle(async (req, res) => {

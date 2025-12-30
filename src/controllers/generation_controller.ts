@@ -7,7 +7,7 @@ import { getStyleById } from "@/services/style_service";
 import { updateUser } from "@/services/user_service";
 import { EGenerationStatus } from "@/types/generation";
 import errorResponse from "@/utils/errors/errorResponse";
-import { generateRandomPrompt } from "@/utils/fa_utils";
+import { generateRandomPrompt } from "@/utils/fal_utils";
 import { generateImageSchema } from "@/utils/validation/generation_validation_schema";
 
 const createImage = AsyncHandler.handle(async (req, res) => {
@@ -38,7 +38,7 @@ const createImage = AsyncHandler.handle(async (req, res) => {
     `TOK ${model.name}`,
   );
   const generations = await Promise.all(
-    Array.from({ length: numberOfImages }).map(async (_, i) => {
+    Array.from({ length: numberOfImages }).map(async () => {
       const prompt = generateRandomPrompt(subject, style.category);
       const requestId = await handleGenerateImage(prompt, model.model_path);
 
