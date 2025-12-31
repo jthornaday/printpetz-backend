@@ -1,5 +1,6 @@
 import cors from "cors";
 import express from "express";
+import { IncomingMessage, ServerResponse } from "http";
 import morgan from "morgan";
 
 import { HttpStatusCodes } from "@/constants/http_status_code";
@@ -8,28 +9,33 @@ import fileRoutes from "@/router/file_router";
 import generationRoutes from "@/router/generation_router";
 import modelRoutes from "@/router/model_router";
 import publicRoutes from "@/router/public_router";
+import stripeRoutes from "@/router/stripe_routes";
 import webhookRoutes from "@/router/webhook_routes";
 
 import { verifyToken } from "./middleware/verify_token";
 
-// const setupForStripeWebhooks = {
-//   // Because Stripe needs the raw body, we compute it but only when hitting the Stripe callback URL.
-//   verify: function (req, res, buf) {
-//     const url = req.originalUrl;
-//     if (url.startsWith("/webhook/stripe")) {
-//       req.rawbody = buf.toString();
-//     }
-//   },
-// };
-
 const app = express();
+
+const setupForStripeWebhooks = {
+  // Because Stripe needs the raw body, we compute it but only when hitting the Stripe callback URL.
+  verify: function (
+    req: IncomingMessage & { originalUrl?: string; rawbody?: string },
+    res: ServerResponse,
+    buf: Buffer,
+  ) {
+    const url = req.originalUrl;
+    if (url?.startsWith("/webhook/stripe")) {
+      req.rawbody = buf.toString();
+    }
+  },
+};
 
 app.use(cors());
 app.use(morgan("dev"));
 app.use(customResponses);
 
 app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
+app.use(express.json(setupForStripeWebhooks));
 
 // health check
 app.get("/", (req, res) => {
@@ -52,6 +58,7 @@ app.use("/file", fileRoutes);
 
 app.use("/model", modelRoutes);
 app.use("/generation", generationRoutes);
+app.use("/stripe", stripeRoutes);
 
 // PRIVATE ROUTES END //
 

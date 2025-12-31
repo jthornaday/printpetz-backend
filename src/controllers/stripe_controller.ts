@@ -1,50 +1,42 @@
-// import Stripe from "stripe";
+import AsyncHandler from "@/context/async_handler";
+import { getPriceByPriceId } from "@/services/price_service";
+import {
+  createCheckoutSession,
+  createStripeCustomer,
+} from "@/services/stripe_service";
+import errorResponse from "@/utils/errors/errorResponse";
+import { checkoutSessionSchema } from "@/utils/validation/stripe_validation_schema";
 
-// import AppConstants from "@/constants/app_constants";
-// import AsyncHandler from "@/context/async_handler";
-// import {
-//   createCheckoutSession,
-//   createStripeCustomer,
-//   getPlan,
-// } from "@/services/stripe_service";
-// import { dataReturnOnlyIfUserExist } from "@/services/user_service";
-// import { checkoutSessionSchema } from "@/validation/stripe_schema";
+const handleCheckoutSession = AsyncHandler.handle(async (req, res) => {
+  const user = req.user;
 
-// const stripe = new Stripe(AppConstants.stripeKey);
+  const { priceId, redirectUrl } = checkoutSessionSchema.parse(req.body);
 
-// const createCheckout = AsyncHandler.handle(async (req, res) => {
-//   const userId = req.userId;
-//   const validatedData = await checkoutSessionSchema.validateAsync(req.body);
+  const price = await getPriceByPriceId(priceId);
+  if (!price) {
+    throw errorResponse.Api404Error({
+      errorDescription: "Price not found",
+    });
+  }
 
-//   const [user, { metadata }] = await Promise.all([
-//     dataReturnOnlyIfUserExist({
-//       userId,
-//     }),
-//     stripe.prices.retrieve(validatedData.priceId),
-//   ]);
+  // create and update stripe customer if user has not stripeId
+  if (!user.stripe_customer_id) {
+    const customerId = await createStripeCustomer(user);
+    user.stripe_customer_id = customerId;
+  }
 
-//   // create and update stripe customer if user has not stripeId
-//   if (!user.stripeCustomerId) {
-//     const name = `${user.basicInfo.firstName} ${user.basicInfo.lastName}`;
-//     const customerId = await createStripeCustomer(
-//       {
-//         name,
-//         email: user.email,
-//         metadata: { user_id: userId },
-//       },
-//       userId,
-//     );
+  const session = await createCheckoutSession({
+    price,
+    redirectUrl,
+    stripeCustomerId: user.stripe_customer_id,
+    metadata: {
+      userId: user.id,
+      credits: price.credits.toString(),
+      priceId: price.price_id,
+    },
+  });
 
-//     user.stripeCustomerId = customerId;
-//   }
+  res.dataUpdateSuccess({ data: { session } });
+});
 
-//   const sessionConfig = await createCheckoutSession({
-//     ...validatedData,
-//     stripeCustomerId: user.stripeCustomerId,
-//     metadata: { ...metadata, userId },
-//   });
-
-//   res.dataUpdateSuccess({ data: sessionConfig });
-// });
-
-// export { createCheckout };
+export { handleCheckoutSession };

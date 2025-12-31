@@ -16,9 +16,9 @@ const createImage = AsyncHandler.handle(async (req, res) => {
     req.body,
   );
 
-  if (user.credit < AppConstants.generationChargePerImage * numberOfImages) {
+  if (user.credits < AppConstants.generationChargePerImage * numberOfImages) {
     throw errorResponse.Api403Error({
-      errorDescription: "You don`t have sufficient credit to generate image",
+      errorDescription: "You don`t have sufficient credits to generate image",
     });
   }
 
@@ -57,8 +57,8 @@ const createImage = AsyncHandler.handle(async (req, res) => {
   // Cut credits from user
   await updateUser({
     id: user.id,
-    credit:
-      user.credit - AppConstants.generationChargePerImage * numberOfImages,
+    credits:
+      user.credits - AppConstants.generationChargePerImage * numberOfImages,
   });
 
   res.dataCreateSuccess({ data: { generations } });

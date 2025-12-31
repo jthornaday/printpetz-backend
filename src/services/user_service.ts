@@ -29,6 +29,33 @@ export const getUser = async (id: string) => {
 };
 
 /**
+ * Get a user by their stripe customer ID.
+ * @param stripeCustomerId - The ID of the user's stripe customer
+ * @returns The user object if it exists, otherwise throws an error
+ */
+export const getUserByStripeCustomerId = async (stripeCustomerId: string) => {
+  const { data, error } = await retrySupabase<IUser>(
+    async () =>
+      await supabase
+        .from(tables.users)
+        .select("*")
+        .eq("stripe_customer_id", stripeCustomerId)
+        .single(),
+  );
+
+  if (error) {
+    addErrorLog({
+      error: JSON.stringify(error),
+      input: JSON.stringify({ stripeCustomerId }),
+      type: "GET_USER_BY_STRIPE_CUSTOMER_ID",
+    });
+    return null;
+  }
+
+  return data;
+};
+
+/**
  * Create a new user.
  * @param user - The user object to create
  * @returns User if the user was created, otherwise null

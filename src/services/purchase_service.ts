@@ -1,24 +1,29 @@
-import { addPaymentHistory } from "./payment_history_service";
+import { retrySupabase } from "@/context/retry";
+import supabase from "@/supabase/create_client";
+import { tables } from "@/supabase/tables";
+import { IPurchase } from "@/types/purchase";
 
-type NonRenewingPurchaseProps = {
-  user_id: string;
-  transfer_id: string;
-  credit: number;
-  price_details: {
-    price: number;
-    currency?: string;
-  };
-};
+import { addErrorLog } from "./error_logs_service";
 
-export const nonRenewingPurchaseHandler = async (
-  input: NonRenewingPurchaseProps,
-) => {
-  const { user_id, transfer_id, credit, price_details } = input;
+/**
+ * Add a purchase to the database.
+ * @param input - The purchase object to add
+ * @returns Purchase if the purchase was added, otherwise null
+ */
+export const addPurchase = async (input: Partial<IPurchase>) => {
+  const { data, error } = await retrySupabase<IPurchase>(
+    async () =>
+      await supabase.from(tables.purchases).insert(input).select("*").single(),
+  );
 
-  addPaymentHistory({
-    user_id,
-    transfer_id,
-    credit,
-    price_details,
-  });
+  if (error) {
+    addErrorLog({
+      input: JSON.stringify(input),
+      error: JSON.stringify({ error }),
+      type: "ADD_PURCHASE",
+    });
+    return null;
+  }
+
+  return data;
 };

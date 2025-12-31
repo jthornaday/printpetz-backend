@@ -11,15 +11,11 @@ export type NonRenewingPurchaseObject = {
   periodType: string;
 };
 
-interface PriceDetails {
-  price: number;
-  currency?: string;
-}
-
-export interface IPurchaseHistory {
+export interface IPurchase {
   id: number;
   user_id: string;
-  credit: number;
-  transfer_id: string;
-  price_details: PriceDetails;
+  transaction_id: string;
+  amount: number;
+  currency: string;
+  credits: number;
 }

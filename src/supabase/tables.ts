@@ -4,4 +4,6 @@ export const tables = {
   styles: "styles",
   generations: "generations",
   errorLogs: "error_logs",
+  prices: "prices",
+  purchases: "purchases",
 };

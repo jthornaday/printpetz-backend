@@ -12,9 +12,9 @@ const trainModel = AsyncHandler.handle(async (req, res) => {
   const user = req.user;
   const { images, name } = modelTrainingSchema.parse(req.body);
 
-  if (user.credit < AppConstants.modelTrainingCredit) {
+  if (user.credits < AppConstants.modelTrainingCredit) {
     throw errorResponse.Api403Error({
-      errorDescription: "You don`t have sufficient credit to train model",
+      errorDescription: "You don`t have sufficient credits to train model",
     });
   }
 
@@ -36,7 +36,7 @@ const trainModel = AsyncHandler.handle(async (req, res) => {
   // Cut credits from user
   await updateUser({
     id: user.id,
-    credit: user.credit - AppConstants.modelTrainingCredit,
+    credits: user.credits - AppConstants.modelTrainingCredit,
   });
 
   res.dataCreateSuccess({ data: { model } });

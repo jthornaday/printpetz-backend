@@ -1,65 +1,34 @@
-import Stripe from "stripe";
-import { OutputFileType } from "typescript";
-
-import AppConstants from "@/constants/app_constants";
 import AsyncHandler from "@/context/async_handler";
-import { streamUploadToS3, uploadFileToS3 } from "@/services/aws_service";
-import { addErrorLog } from "@/services/error_logs_service";
+import { uploadFileToS3 } from "@/services/aws_service";
 import { getFileBufferFromUrl } from "@/services/file_service";
 import {
   getGenerationByRequestId,
   updateGeneration,
 } from "@/services/generation_service";
 import { getModelByRequestId, updateModel } from "@/services/model_service";
-import { nonRenewingPurchaseHandler } from "@/services/purchase_service";
+import { handleCheckout, handlePriceChange } from "@/services/stripe_service";
 import { EUploadPath } from "@/types/aws";
 import { EGenerationStatus } from "@/types/generation";
 import { EModelStatus } from "@/types/model";
 import errorResponse from "@/utils/errors/errorResponse";
 
-// const stripe = new Stripe(AppConstants.stripeKey);
+const stripeEventForCheckout = AsyncHandler.handle(async (req, res) => {
+  const rawPayload = req.rawbody;
+  const sig = req.headers["stripe-signature"];
 
-// const stripeEventForCheckout = AsyncHandler.handle(async (req, res) => {
-//   const rawPayload = req.rawbody;
-//   const sig = req.headers["stripe-signature"];
-//   const stripeWebhookSecret = AppConstants.stripeWebhookSecret;
+  await handleCheckout(rawPayload, sig);
 
-//   const event = stripe.webhooks.constructEvent(
-//     rawPayload,
-//     sig,
-//     stripeWebhookSecret,
-//   );
+  res.dataUpdateSuccess();
+});
 
-//   // Handle the event
-//   switch (event.type) {
-//     case "checkout.session.completed":
-//       {
-//         const eventObject = event.data.object;
+const stripeEventForPriceChange = AsyncHandler.handle(async (req, res) => {
+  const rawPayload = req.rawbody;
+  const sig = req.headers["stripe-signature"];
 
-//         const { userId, credit } = eventObject.metadata;
-//         const transferId = eventObject.payment_intent;
+  await handlePriceChange(rawPayload, sig);
 
-//         const amount = eventObject.amount_total / 100;
-
-//         await nonRenewingPurchaseHandler({
-//           user_id: userId,
-//           transfer_id: transferId as string,
-//           credit: Number(credit),
-//           price_details: {
-//             price: amount,
-//             currency: eventObject.currency,
-//           },
-//         });
-//       }
-//       break;
-//     case "invoice.payment_failed":
-//       break;
-//     default:
-//       console.log(`Unhandled event type ${event.type}`);
-//   }
-
-//   res.status(200).json({ success: true });
-// });
+  res.dataUpdateSuccess();
+});
 
 const falTrainingResult = AsyncHandler.handle(async (req, res) => {
   const reqBody = req.body;
@@ -161,4 +130,9 @@ const falImageGenerationResult = AsyncHandler.handle(async (req, res) => {
   res.dataUpdateSuccess();
 });
 
-export { falImageGenerationResult, falTrainingResult };
+export {
+  falImageGenerationResult,
+  falTrainingResult,
+  stripeEventForCheckout,
+  stripeEventForPriceChange,
+};

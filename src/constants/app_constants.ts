@@ -6,8 +6,11 @@ export default class AppConstants {
   static supabaseServiceKey = process.env.SUPABASE_KEY;
   static supabaseDbUrl = process.env.SUPABASE_DB_URL;
 
-  // static stripeKey = process.env.STRIPE_API_KEY;
-  // static stripeWebhookSecret = process.env.STRIPE_API_KEY;
+  static stripeKey = process.env.STRIPE_API_KEY;
+  static stripePriceChangeWebhookSecret =
+    process.env.STRIPE_PRICE_CHANGE_WEBHOOK_SECRET;
+  static stripeCheckoutWebhookSecret =
+    process.env.STRIPE_CHECKOUT_WEBHOOK_SECRET;
 
   static awsAccessKey = process.env.AWS_ACCESS_KEY;
   static awsSecretKey = process.env.AWS_SECRET_KEY;

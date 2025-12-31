@@ -3,5 +3,6 @@ export interface IUser {
   name: string | null;
   email: string;
   profile_image: string | null;
-  credit: number;
+  credits: number;
+  stripe_customer_id: string | null;
 }

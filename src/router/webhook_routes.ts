@@ -4,10 +4,15 @@ import * as webhookController from "@/controllers/webhook_controller";
 
 const router: Router = Router();
 
-// router.post(
-//   "/stripe/checkout-completed",
-//   webhookController.stripeEventForCheckout,
-// );
+router.post(
+  "/stripe/checkout-completed",
+  webhookController.stripeEventForCheckout,
+);
+router.post(
+  "/stripe/price-change",
+  webhookController.stripeEventForPriceChange,
+);
+
 router.post("/fal/training-result", webhookController.falTrainingResult);
 router.post(
   "/fal/generation-result",
