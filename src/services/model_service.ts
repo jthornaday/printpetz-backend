@@ -1,8 +1,12 @@
 import { retrySupabase } from "@/context/retry";
 import supabase from "@/supabase/create_client";
 import { tables } from "@/supabase/tables";
-import { IModel } from "@/types/model";
+import { EUploadPath } from "@/types/aws";
+import { TFalModelTrainingResponse } from "@/types/fal";
+import { EModelStatus, IModel } from "@/types/model";
+import errorResponse from "@/utils/errors/errorResponse";
 
+import { streamUploadToS3 } from "./aws_service";
 import { addErrorLog } from "./error_logs_service";
 
 export const getModelById = async (id: number) => {
@@ -96,4 +100,73 @@ export const updateModel = async (input: Partial<IModel>) => {
   }
 
   return data;
+};
+
+const handleModelUploadAndSave = async (modelUrl: string, model: IModel) => {
+  const fileName = modelUrl?.split("/").at(-1);
+  const fileType = "binary/octet-stream";
+
+  const uploadData = {
+    url: modelUrl,
+    fileType,
+    Key: `${EUploadPath.MODEL.replace("[USER_ID]", model.user_id)}/${fileName}`,
+  };
+
+  const startAt = Date.now();
+
+  const url = await streamUploadToS3(uploadData);
+
+  console.log({ url, timeTaken: `${(Date.now() - startAt) / 1000}s` });
+
+  if (url) {
+    await updateModel({
+      id: model.id,
+      status: EModelStatus.COMPLETED,
+      model_path: url,
+    });
+  }
+};
+
+export const handleModelTrainingResponse = async (
+  reqBody: TFalModelTrainingResponse,
+) => {
+  const model = await getModelByRequestId(reqBody.request_id);
+  if (!model) {
+    throw errorResponse.Api404Error({
+      errorDescription: `Model not found with this request-id`,
+    });
+  }
+
+  if (reqBody.status === "ERROR") {
+    await updateModel({
+      id: model.id,
+      status: EModelStatus.ERROR,
+      error: reqBody.payload?.details?.[0],
+    });
+
+    return true;
+  }
+
+  if (reqBody.status === "OK") {
+    const modelUrl = reqBody.payload?.lora_file?.url;
+
+    if (!modelUrl) {
+      throw errorResponse.Api400Error({
+        errorDescription: "model url required",
+      });
+    }
+
+    // Process upload in background to avoid webhook timeout
+    handleModelUploadAndSave(modelUrl, model);
+
+    return true;
+  }
+
+  addErrorLog({
+    error: JSON.stringify(reqBody),
+    input: JSON.stringify(reqBody),
+    type: "UNEXPECTED_MODEL_TRAINING_RESPONSE",
+  });
+
+  return true;
 };

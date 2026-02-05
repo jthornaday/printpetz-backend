@@ -28,16 +28,11 @@ export const getFileBufferFromUrl = async (
   }
 };
 
-export const getStreamResponseFromUrl = async (
-  url: string,
-  fileType?: string,
-): Promise<Buffer> => {
+export const getStreamResponseFromUrl = async (url: string): Promise<any> => {
   try {
     const response = await axios.get(url, {
       responseType: "stream",
     });
-
-    console.log(response.headers);
 
     return response.data;
   } catch (error) {

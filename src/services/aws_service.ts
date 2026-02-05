@@ -1,10 +1,11 @@
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { Upload } from "@aws-sdk/lib-storage";
 
 import AppConstants from "@/constants/app_constants";
 import { IS3UploadProps } from "@/types/aws";
 
 import { addErrorLog } from "./error_logs_service";
-import { getFileBufferFromUrl, getStreamResponseFromUrl } from "./file_service";
+import { getStreamResponseFromUrl } from "./file_service";
 
 const s3 = new S3Client({
   region: "us-east-1",
@@ -48,25 +49,33 @@ export const uploadFileToS3 = async (input: IS3UploadProps) => {
 export const streamUploadToS3 = async (input: IS3UploadProps) => {
   const { Key, url, fileType } = input;
 
-  const resStream = await getStreamResponseFromUrl(url, fileType);
+  const resStream = await getStreamResponseFromUrl(url);
 
   try {
-    const uploadParams = {
-      Bucket,
-      Key,
-      Body: resStream,
-      ContentType: fileType, // Adjust the content type accordingly
-    };
+    const parallelUploads3 = new Upload({
+      client: s3,
+      params: {
+        Bucket,
+        Key,
+        Body: resStream,
+        ContentType: fileType,
+      },
+    });
 
-    const command = new PutObjectCommand(uploadParams);
-    await s3.send(command);
+    parallelUploads3.on("httpUploadProgress", (progress) => {
+      console.log(
+        `Upload progress: ${progress.loaded} / ${progress.total}, Part: ${progress.part}`,
+      );
+    });
+
+    await parallelUploads3.done();
 
     return `${AppConstants.cloudfrontDomain}/${Key}`;
   } catch (err) {
     addErrorLog({
       error: JSON.stringify(err),
       input: JSON.stringify({ Key, fileType, url }),
-      type: "FILE_UPLOAD_TO_AWS",
+      type: "STREAM_FILE_UPLOAD_TO_AWS",
     });
     return null;
   }

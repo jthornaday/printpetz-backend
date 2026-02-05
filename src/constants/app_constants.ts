@@ -15,7 +15,7 @@ export default class AppConstants {
   static awsAccessKey = process.env.AWS_ACCESS_KEY;
   static awsSecretKey = process.env.AWS_SECRET_KEY;
   static awsBucketName = process.env.AWS_BUCKET;
-  static cloudfrontDomain = "https://printpetz.s3.us-east-1.amazonaws.com";
+  static cloudfrontDomain = "https://d155jdfit5sgy.cloudfront.net";
 
   static falApiKey = process.env.FAL_API_KEY;
 

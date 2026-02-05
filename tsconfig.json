@@ -3,7 +3,7 @@
     "module": "commonjs",
     "outDir": "lib",
     "sourceMap": true,
-    "target": "es6",
+    "target": "es2022",
     "allowSyntheticDefaultImports": true,
     "noImplicitAny": false,
     "noUnusedLocals": false,
@@ -11,7 +11,7 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "esModuleInterop": true,
-    "lib": ["ES2021.String"],
+    "lib": ["ES2022"],
     "paths": {
       "@/*": ["./src/*"],
     },
