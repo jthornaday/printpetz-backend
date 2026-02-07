@@ -1,7 +1,12 @@
-export interface IS3UploadProps {
+export interface IS3StreamUploadProps {
   Key: string;
-  buffer?: Buffer;
-  url?: string;
+  url: string;
+  fileType: string;
+}
+
+export interface IS3FileUploadProps {
+  Key: string;
+  buffer: Buffer;
   fileType: string;
 }
 

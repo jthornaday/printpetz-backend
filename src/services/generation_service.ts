@@ -91,8 +91,10 @@ const handleImageUploadAndSave = async (
   const fileName = image.url?.split("/").at(-1);
   const fileType = image.content_type;
 
+  const buffer = await getFileBufferFromUrl(image.url, fileType);
+
   const uploadData = {
-    url: image.url,
+    buffer,
     fileType,
     Key: `${EUploadPath.GENERATION_IMAGE.replace("[USER_ID]", generation.user_id)}/${fileName}`,
   };

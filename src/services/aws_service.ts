@@ -2,7 +2,7 @@ import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
 
 import AppConstants from "@/constants/app_constants";
-import { IS3UploadProps } from "@/types/aws";
+import { IS3FileUploadProps, IS3StreamUploadProps } from "@/types/aws";
 
 import { addErrorLog } from "./error_logs_service";
 import { getStreamResponseFromUrl } from "./file_service";
@@ -17,7 +17,7 @@ const s3 = new S3Client({
 
 const Bucket = AppConstants.awsBucketName;
 
-export const uploadFileToS3 = async (input: IS3UploadProps) => {
+export const uploadFileToS3 = async (input: IS3FileUploadProps) => {
   const { Key, buffer, fileType } = input;
 
   try {
@@ -46,7 +46,7 @@ export const uploadFileToS3 = async (input: IS3UploadProps) => {
   }
 };
 
-export const streamUploadToS3 = async (input: IS3UploadProps) => {
+export const streamUploadToS3 = async (input: IS3StreamUploadProps) => {
   const { Key, url, fileType } = input;
 
   const resStream = await getStreamResponseFromUrl(url);
