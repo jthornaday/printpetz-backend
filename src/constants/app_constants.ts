@@ -22,5 +22,5 @@ export default class AppConstants {
   static serverBaseUrl = process.env.SERVER_BASE_URL;
 
   static modelTrainingCredit = 10;
-  static generationChargePerImage = 2;
+  static imageGenerationCredit = 2;
 }

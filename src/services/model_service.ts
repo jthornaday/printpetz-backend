@@ -1,3 +1,4 @@
+import AppConstants from "@/constants/app_constants";
 import { retrySupabase } from "@/context/retry";
 import supabase from "@/supabase/create_client";
 import { tables } from "@/supabase/tables";
@@ -8,6 +9,7 @@ import errorResponse from "@/utils/errors/errorResponse";
 
 import { streamUploadToS3 } from "./aws_service";
 import { addErrorLog } from "./error_logs_service";
+import { updateUserCredit } from "./user_service";
 
 export const getModelById = async (id: number) => {
   const { data, error } = await retrySupabase<IModel>(
@@ -138,11 +140,14 @@ export const handleModelTrainingResponse = async (
   }
 
   if (reqBody.status === "ERROR") {
-    await updateModel({
-      id: model.id,
-      status: EModelStatus.ERROR,
-      error: reqBody.payload?.details?.[0],
-    });
+    await Promise.all([
+      updateModel({
+        id: model.id,
+        status: EModelStatus.ERROR,
+        error: reqBody.payload?.details?.[0],
+      }),
+      updateUserCredit(model.user_id, AppConstants.modelTrainingCredit, true),
+    ]);
 
     return true;
   }

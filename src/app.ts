@@ -2,6 +2,7 @@ import cors from "cors";
 import express from "express";
 import { IncomingMessage, ServerResponse } from "http";
 import morgan from "morgan";
+import path from "path";
 
 import { HttpStatusCodes } from "@/constants/http_status_code";
 import customResponses from "@/middleware/custom_responses";
@@ -42,6 +43,14 @@ app.get("/", (req, res) => {
   res.status(200).send("OK");
 });
 
+// Serve static files (including favicon.ico)
+app.use(express.static(path.join("public")));
+
+// Optional: Explicit route for favicon.ico
+app.get("/favicon.ico", (req, res) =>
+  res.sendFile(path.join("public", "favicon.ico")),
+);
+
 app.use("/webhook", webhookRoutes);
 
 // PUBLIC ROUTES START //
@@ -50,15 +59,12 @@ app.use("/public", publicRoutes);
 
 // PUBLIC ROUTES END //
 
-app.use(verifyToken);
-
 // PRIVATE ROUTES START //
 
-app.use("/file", fileRoutes);
-
-app.use("/model", modelRoutes);
-app.use("/generation", generationRoutes);
-app.use("/stripe", stripeRoutes);
+app.use("/file", verifyToken, fileRoutes);
+app.use("/model", verifyToken, modelRoutes);
+app.use("/generation", verifyToken, generationRoutes);
+app.use("/stripe", verifyToken, stripeRoutes);
 
 // PRIVATE ROUTES END //
 

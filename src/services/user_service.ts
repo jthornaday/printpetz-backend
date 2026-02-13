@@ -87,3 +87,28 @@ export const updateUser = async (input: Partial<IUser>) => {
 
   return data;
 };
+
+/**
+ * Update user`s credits
+ * @param userId - The ID of the user
+ * @param credits - The number of credits to update
+ * @param isInc - Whether to increment or decrement the credits
+ * @returns True if the user was updated, otherwise false
+ */
+export const updateUserCredit = async (
+  userId: string,
+  credits: number,
+  isInc = false,
+) => {
+  const user = await getUser(userId);
+  if (!user) {
+    return false;
+  }
+
+  const multiplier = isInc ? 1 : -1;
+  const updatedCredits = user.credits + credits * multiplier;
+
+  await updateUser({ id: userId, credits: updatedCredits });
+
+  return true;
+};

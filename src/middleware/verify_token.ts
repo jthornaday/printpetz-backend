@@ -27,7 +27,7 @@ export const verifyToken = async (req, res, next) => {
       !req.baseUrl.includes("/public")
     ) {
       throw errorResponse.Api400Error({
-        errorDescription: "please provide a user_id or authorization",
+        errorDescription: "please provide authorization token in header",
       });
     }
 

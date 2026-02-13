@@ -1,5 +1,6 @@
 import { QwenImageOutput } from "@fal-ai/client/endpoints";
 
+import AppConstants from "@/constants/app_constants";
 import { retrySupabase } from "@/context/retry";
 import supabase from "@/supabase/create_client";
 import { tables } from "@/supabase/tables";
@@ -11,6 +12,7 @@ import errorResponse from "@/utils/errors/errorResponse";
 import { uploadFileToS3 } from "./aws_service";
 import { addErrorLog } from "./error_logs_service";
 import { getFileBufferFromUrl } from "./file_service";
+import { updateUserCredit } from "./user_service";
 
 export const addGeneration = async (input: Partial<IGeneration>) => {
   const { data, error } = await retrySupabase<IGeneration>(
@@ -123,11 +125,18 @@ export const handleImageGenerationResponse = async (
   }
 
   if (status === "ERROR") {
-    await updateGeneration({
-      id: generation.id,
-      status: EGenerationStatus.ERROR,
-      error: payload?.details?.[0],
-    });
+    await Promise.all([
+      updateGeneration({
+        id: generation.id,
+        status: EGenerationStatus.ERROR,
+        error: payload?.details?.[0],
+      }),
+      updateUserCredit(
+        generation.user_id,
+        AppConstants.imageGenerationCredit,
+        true,
+      ),
+    ]);
 
     return true;
   }

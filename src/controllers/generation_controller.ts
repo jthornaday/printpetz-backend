@@ -4,7 +4,7 @@ import { handleGenerateImage } from "@/services/fal_service";
 import { addGeneration } from "@/services/generation_service";
 import { getModelById } from "@/services/model_service";
 import { getStyleById } from "@/services/style_service";
-import { updateUser } from "@/services/user_service";
+import { updateUserCredit } from "@/services/user_service";
 import { EGenerationStatus } from "@/types/generation";
 import errorResponse from "@/utils/errors/errorResponse";
 import { generateRandomPrompt } from "@/utils/fal_utils";
@@ -16,7 +16,10 @@ const createImage = AsyncHandler.handle(async (req, res) => {
     req.body,
   );
 
-  if (user.credits < AppConstants.generationChargePerImage * numberOfImages) {
+  const generationCharge = AppConstants.imageGenerationCredit * numberOfImages;
+  const hasEnoughCredit = user.credits >= generationCharge;
+
+  if (!hasEnoughCredit) {
     throw errorResponse.Api403Error({
       errorDescription: "You don`t have sufficient credits to generate image",
     });
@@ -55,11 +58,7 @@ const createImage = AsyncHandler.handle(async (req, res) => {
   );
 
   // Cut credits from user
-  await updateUser({
-    id: user.id,
-    credits:
-      user.credits - AppConstants.generationChargePerImage * numberOfImages,
-  });
+  await updateUserCredit(user.id, generationCharge, false);
 
   res.dataCreateSuccess({ data: { generations } });
 });
