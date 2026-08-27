@@ -104,14 +104,18 @@ export const updateModel = async (input: Partial<IModel>) => {
   return data;
 };
 
-const handleModelUploadAndSave = async (modelUrl: string, model: IModel) => {
+const handleModelUploadAndSave = async (
+  modelUrl: string,
+  model: IModel,
+  provider: "flux" | "qwen",
+) => {
   const fileName = modelUrl?.split("/").at(-1);
   const fileType = "binary/octet-stream";
 
   const uploadData = {
     url: modelUrl,
     fileType,
-    Key: `${EUploadPath.MODEL.replace("[USER_ID]", model.user_id)}/${fileName}`,
+    Key: `${EUploadPath.MODEL.replace("[USER_ID]", model.user_id)}/${provider}/${fileName}`,
   };
 
   const startAt = Date.now();
@@ -153,7 +157,9 @@ export const handleModelTrainingResponse = async (
   }
 
   if (reqBody.status === "OK") {
-    const modelUrl = reqBody.payload?.lora_file?.url;
+    const fluxModelUrl = reqBody.payload?.diffusers_lora_file?.url;
+    const qwenModelUrl = reqBody.payload?.lora_file?.url;
+    const modelUrl = fluxModelUrl ?? qwenModelUrl;
 
     if (!modelUrl) {
       throw errorResponse.Api400Error({
@@ -162,7 +168,7 @@ export const handleModelTrainingResponse = async (
     }
 
     // Process upload in background to avoid webhook timeout
-    handleModelUploadAndSave(modelUrl, model);
+    handleModelUploadAndSave(modelUrl, model, fluxModelUrl ? "flux" : "qwen");
 
     return true;
   }
