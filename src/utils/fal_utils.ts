@@ -1,14 +1,10 @@
 import axios from "axios";
 import JSZip from "jszip";
 
-import {
-  ACTIONS,
-  CAMERA,
-  LIGHTING,
-  LOCATIONS,
-  QUALITY,
-} from "@/constants/prompts";
 import { addErrorLog } from "@/services/error_logs_service";
+import errorResponse from "@/utils/errors/errorResponse";
+
+const MINIMUM_TRAINING_IMAGES = 3;
 
 interface CreateDatasetZipOptions {
   imageUrls: string[];
@@ -19,19 +15,28 @@ export const createTrainingZip = async ({
 }: CreateDatasetZipOptions): Promise<Blob> => {
   try {
     const zip = new JSZip();
+    let successfulImageCount = 0;
 
     for (let i = 0; i < imageUrls.length; i++) {
       const url = imageUrls[i];
-      const ext = "jpg";
-      const filename = `image_${i + 1}.${ext}`;
 
       try {
-        // 1️⃣ Download image as buffer
         const imageResponse = await axios.get(url, {
           responseType: "arraybuffer",
         });
+        const contentType = imageResponse.headers["content-type"];
 
+        if (contentType && !contentType.startsWith("image/")) {
+          throw new Error(`Unsupported training file type: ${contentType}`);
+        }
+
+        if (!imageResponse.data?.byteLength) {
+          throw new Error("Training image is empty");
+        }
+
+        const filename = `image_${successfulImageCount + 1}.jpg`;
         zip.file(filename, imageResponse.data);
+        successfulImageCount += 1;
       } catch (error) {
         addErrorLog({
           input: JSON.stringify({ url }),
@@ -39,15 +44,15 @@ export const createTrainingZip = async ({
           type: "FETCH_FILE",
         });
       }
-
-      // 2️⃣ Add image file
-
-      // 3️⃣ Add caption file with trigger phrase
-      // const captionFilename = `image_${i + 1}.txt`;
-      // zip.file(captionFilename, triggerPhrase);
     }
 
-    // 4️⃣ Generate ZIP Blob
+    if (successfulImageCount < MINIMUM_TRAINING_IMAGES) {
+      throw errorResponse.Api400Error({
+        errorDescription:
+          "At least 3 readable pet photos are required. Please replace any photos that failed to upload.",
+      });
+    }
+
     const content = await zip.generateAsync({ type: "blob" });
     return content;
   } catch (error) {
@@ -61,8 +66,5 @@ export const createTrainingZip = async ({
   }
 };
 
-export const generateRandomPrompt = (subject: string, category: string) => {
-  const random = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)];
-
-  return `${subject}, ${random(ACTIONS[category])}, ${random(LOCATIONS[category])}, ${random(LIGHTING)}, ${random(CAMERA)}, ${random(QUALITY)}.`;
-};
+export const generateIdentityPrompt = (subject: string) =>
+  `${subject}. Preserve the exact identity of the trained pet named above: the same coat colors and pattern, facial markings, eye color, ear shape, muzzle shape, nose, and head proportions. Show one pet only. Make the pet's face the clear focal point, recognizable as the trained pet, with sharp facial detail and clean professional image quality.`;

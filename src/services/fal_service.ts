@@ -41,15 +41,17 @@ export const handleGenerateImage = async (prompt: string, path: string) => {
     const result = await fal.queue.submit("fal-ai/qwen-image", {
       input: {
         prompt,
-        loras: [{ path }],
+        loras: [{ path, scale: 1.15 }],
         num_images: 1,
+        num_inference_steps: 40,
+        guidance_scale: 2.5,
         output_format: "jpeg",
         image_size: {
           width: 820,
           height: 1024,
         }, // 4:5 ratio
         negative_prompt:
-          "blurry, low resolution, low quality, watermark, logo, text, cropped, out of frame, ugly face, cartoon, 3d, illustration, anime, multiple body parts",
+          "blurry, low resolution, low quality, watermark, logo, text, cropped face, out of frame, distorted face, deformed anatomy, duplicate animal, multiple pets, extra limbs, extra ears, extra eyes",
       },
       webhookUrl: `${AppConstants.serverBaseUrl}/webhook/fal/generation-result`,
     });
