@@ -10,12 +10,15 @@ export const handleTrainModel = async (datasetUrl: Blob, name: string) => {
   try {
     // Build input object
     const input = {
-      image_data_url: datasetUrl,
-      trigger_phrase: `TOK ${name}`,
+      images_data_url: datasetUrl,
+      trigger_word: "TOK",
+      create_masks: true,
+      is_style: false,
+      steps: 500,
     };
 
     // Submit job — check if SDK supports training endpoint
-    const result = await fal.queue.submit("fal-ai/qwen-image-trainer", {
+    const result = await fal.queue.submit("fal-ai/flux-lora-fast-training", {
       input,
       webhookUrl: `${AppConstants.serverBaseUrl}/webhook/fal/training-result`,
     });
@@ -38,13 +41,17 @@ export const handleTrainModel = async (datasetUrl: Blob, name: string) => {
 
 export const handleGenerateImage = async (prompt: string, path: string) => {
   try {
-    const result = await fal.queue.submit("fal-ai/qwen-image", {
+    const isFluxModel = path.includes("/flux/");
+    const endpoint = isFluxModel ? "fal-ai/flux-lora" : "fal-ai/qwen-image";
+
+    const result = await fal.queue.submit(endpoint, {
       input: {
         prompt,
         loras: [{ path, scale: 1.15 }],
         num_images: 1,
-        num_inference_steps: 40,
-        guidance_scale: 2.5,
+        num_inference_steps: isFluxModel ? 28 : 40,
+        guidance_scale: isFluxModel ? 3.5 : 2.5,
+        ...(isFluxModel ? { acceleration: "regular" as const } : {}),
         output_format: "jpeg",
         image_size: {
           width: 820,

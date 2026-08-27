@@ -1,5 +1,3 @@
-import { QwenImageOutput } from "@fal-ai/client/endpoints";
-
 interface IFalErrorResponse {
   error: string;
   request_id: string;
@@ -17,9 +15,21 @@ interface IFalSuccessResponse<T> {
 }
 
 interface IFalModelTrainingResponsePayload {
-  lora_file: {
+  lora_file?: {
     url: string;
   };
+  diffusers_lora_file?: {
+    url: string;
+  };
+}
+
+interface IFalImageGenerationResponsePayload {
+  images: {
+    url: string;
+    width?: number;
+    height?: number;
+    content_type?: string;
+  }[];
 }
 
 export type TFalModelTrainingResponse =
@@ -27,5 +37,5 @@ export type TFalModelTrainingResponse =
   | IFalErrorResponse;
 
 export type TFalImageGenerationResponse =
-  | IFalSuccessResponse<QwenImageOutput>
+  | IFalSuccessResponse<IFalImageGenerationResponsePayload>
   | IFalErrorResponse;
