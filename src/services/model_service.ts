@@ -8,8 +8,9 @@ import { EModelStatus, IModel } from "@/types/model";
 import errorResponse from "@/utils/errors/errorResponse";
 
 import { streamUploadToS3 } from "./aws_service";
+import { sendEmail } from "./email_service";
 import { addErrorLog } from "./error_logs_service";
-import { updateUserCredit } from "./user_service";
+import { getUser, updateUserCredit } from "./user_service";
 
 export const getModelById = async (id: number) => {
   const { data, error } = await retrySupabase<IModel>(
@@ -125,11 +126,22 @@ const handleModelUploadAndSave = async (
   console.log({ url, timeTaken: `${(Date.now() - startAt) / 1000}s` });
 
   if (url) {
-    await updateModel({
+    const updatedModel = await updateModel({
       id: model.id,
       status: EModelStatus.COMPLETED,
       model_path: url,
     });
+
+    if (updatedModel) {
+      const user = await getUser(model.user_id);
+      if (user?.email) {
+        await sendEmail({
+          to: user.email,
+          subject: "Your PrintPetz model is ready",
+          html: `<p>Hi${user.name ? ` ${user.name}` : ""},</p><p>Your PrintPetz pet model has finished training and is ready to use.</p><p>Head back to PrintPetz to start generating images.</p>`,
+        });
+      }
+    }
   }
 };
 
