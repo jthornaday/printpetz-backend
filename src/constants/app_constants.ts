@@ -20,6 +20,7 @@ export default class AppConstants {
   static falApiKey = process.env.FAL_API_KEY;
 
   static serverBaseUrl = process.env.SERVER_BASE_URL;
+  static clientBaseUrl = process.env.CLIENT_BASE_URL || "https://printpetz.com";
 
   static modelTrainingCredit = 30;
   static imageGenerationCredit = 2;
