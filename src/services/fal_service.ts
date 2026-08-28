@@ -8,16 +8,16 @@ fal.config({ credentials: AppConstants.falApiKey });
 
 export const handleTrainModel = async (datasetUrl: Blob, name: string) => {
   try {
-    // Build input object
+    // 400 steps is a faster production balance than the previous 500 while
+    // still leaving enough training iterations for pet identity retention.
     const input = {
       images_data_url: datasetUrl,
       trigger_word: "TOK",
       create_masks: true,
       is_style: false,
-      steps: 500,
+      steps: 400,
     };
 
-    // Submit job — check if SDK supports training endpoint
     const result = await fal.queue.submit("fal-ai/flux-lora-fast-training", {
       input,
       webhookUrl: `${AppConstants.serverBaseUrl}/webhook/fal/training-result`,
@@ -25,7 +25,6 @@ export const handleTrainModel = async (datasetUrl: Blob, name: string) => {
 
     console.log({ result });
 
-    // result.requestId etc
     const requestId = result.request_id;
 
     return requestId;
@@ -47,19 +46,21 @@ export const handleGenerateImage = async (prompt: string, path: string) => {
     const result = await fal.queue.submit(endpoint, {
       input: {
         prompt,
-        // Balance identity retention with prompt control. 0.8 pushed the output
-        // too far into generic mascot/chibi territory; 0.95 keeps the trained
-        // pet's real likeness while still allowing wardrobe, pose, and scene changes.
+        // Preserve the trained pet while leaving the prompt room to control
+        // wardrobe, pose, props, and background.
         loras: [{ path, scale: isFluxModel ? 0.95 : 1.0 }],
         num_images: 1,
-        num_inference_steps: isFluxModel ? 30 : 40,
+        // Reduce inference work from 30/40 to 24/32 for quicker generation.
+        // FAL's FLUX LoRA defaults are around 28 steps, so 24 remains a
+        // conservative quality/speed tradeoff rather than an extreme cut.
+        num_inference_steps: isFluxModel ? 24 : 32,
         guidance_scale: isFluxModel ? 4.0 : 2.5,
         ...(isFluxModel ? { acceleration: "regular" as const } : {}),
         output_format: "jpeg",
         image_size: {
           width: 820,
           height: 1024,
-        }, // 4:5 ratio
+        },
         negative_prompt:
           "blurry, low resolution, low quality, watermark, logo, text, cropped face, out of frame, distorted face, deformed anatomy, duplicate animal, multiple pets, extra limbs, extra ears, extra eyes, giant eyes, oversized cartoon eyes, extreme chibi, toy-like anatomy, photorealistic candid snapshot, spectators, crowd, unrelated people, couch, blanket, furniture, source photo background, floating object, floating bat, unsupported prop, intersecting prop, missing uniform",
       },
