@@ -1,6 +1,6 @@
 import AppConstants from "@/constants/app_constants";
 import AsyncHandler from "@/context/async_handler";
-import { handleGenerateImage } from "@/services/fal_service";
+import { handleGenerateImage, handleRemoveBackground } from "@/services/fal_service";
 import { addGeneration } from "@/services/generation_service";
 import { getModelById } from "@/services/model_service";
 import { getStyleById } from "@/services/style_service";
@@ -57,10 +57,22 @@ const createImage = AsyncHandler.handle(async (req, res) => {
     }),
   );
 
-  // Cut credits from user
   await updateUserCredit(user.id, generationCharge, false);
 
   res.dataCreateSuccess({ data: { generations } });
 });
 
-export { createImage };
+const removeBackground = AsyncHandler.handle(async (req, res) => {
+  const { imageUrl } = req.body ?? {};
+
+  if (!imageUrl || typeof imageUrl !== "string") {
+    throw errorResponse.Api400Error({
+      errorDescription: "A valid image URL is required",
+    });
+  }
+
+  const imageUrlWithoutBackground = await handleRemoveBackground(imageUrl);
+  res.dataCreateSuccess({ data: { imageUrl: imageUrlWithoutBackground } });
+});
+
+export { createImage, removeBackground };
