@@ -75,6 +75,14 @@ const getCutenessPrompt = (cutenessLevel: number) => {
     return "Push the character noticeably cuter: slightly larger head, slightly larger expressive eyes, softer friendly features, compact mascot proportions, and charming premium animated-character appeal while preserving the pet's true identity.";
   }
 
+  if (cutenessLevel === 4) {
+    return "Make the character super cute and clearly mascot-like: a larger head, bigger expressive eyes, softer rounded facial features, compact athletic body proportions, and strong premium animated-character charm while still preserving the pet's recognizable identity.";
+  }
+
+  if (cutenessLevel === 5) {
+    return "STOP IT, CUTE!: maximize adorable mascot appeal while preserving the pet's identity. Use the cutest tasteful proportions: noticeably larger head, big expressive eyes, soft rounded facial features, compact charming body proportions, playful premium character styling, and irresistible animated-mascot energy. Keep the pet clearly recognizable and avoid deforming or oversimplifying its real facial markings, ears, muzzle, nose, coat pattern, or eye color.";
+  }
+
   return "Use a balanced cute mascot treatment: slightly larger head, subtly larger expressive eyes, softer friendly features, and polished character proportions while preserving the pet's true identity.";
 };
 
