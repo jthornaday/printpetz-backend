@@ -66,5 +66,17 @@ export const createTrainingZip = async ({
   }
 };
 
-export const generateIdentityPrompt = (subject: string) =>
-  `${subject}. IMPORTANT: fully transform the trained pet into the selected style, role, outfit, pose, and environment described above. Do not recreate, copy, or preserve the original training-photo background, camera angle, pose, clothing, people, furniture, or setting. The selected style and scene must be unmistakably visible. Preserve only the pet's identity: the same coat colors and pattern, facial markings, eye color, ear shape, muzzle shape, nose, and head proportions. Show one pet only. The pet should naturally inhabit the requested scene, with the requested wardrobe or sports gear clearly visible, while remaining recognizable as the trained pet. Use sharp facial detail and clean professional image quality.`;
+const getCutenessPrompt = (cutenessLevel: number) => {
+  if (cutenessLevel === 1) {
+    return "Keep the character mostly natural and realistic, with only gentle mascot stylization and normal head-to-body proportions.";
+  }
+
+  if (cutenessLevel === 3) {
+    return "Push the character noticeably cuter: slightly larger head, slightly larger expressive eyes, softer friendly features, compact mascot proportions, and charming premium animated-character appeal while preserving the pet's true identity.";
+  }
+
+  return "Use a balanced cute mascot treatment: slightly larger head, subtly larger expressive eyes, softer friendly features, and polished character proportions while preserving the pet's true identity.";
+};
+
+export const generateIdentityPrompt = (subject: string, cutenessLevel = 2) =>
+  `${subject}. IMPORTANT PRINTPETZ MASCOT RULES: fully transform the trained pet into the selected style, role, outfit, pose, and environment described above. Use an upright anthropomorphic character body whenever the selected concept implies a human role or sport. Frame the character primarily from the waist or chest up unless the selected style specifically requires otherwise. Do not recreate, copy, or preserve the original training-photo background, camera angle, pose, clothing, people, hands, furniture, blankets, couches, or setting. Do not show spectators or unrelated people. Do not invent or reproduce real team logos, letters, trademarks, or recognizable professional sports branding unless the selected style explicitly supplies licensed branding. The selected style and scene must be unmistakably visible. Preserve the pet's identity: the same coat colors and pattern, facial markings, eye color, ear shape, muzzle shape, nose, and recognizable facial proportions. Show one pet only. ${getCutenessPrompt(cutenessLevel)} Use a clean, simplified, stylized environment rather than a documentary photo scene. The result should feel like polished, premium, merchandise-ready PrintPetz artwork with sharp facial detail and clean professional image quality.`;
