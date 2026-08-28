@@ -133,14 +133,40 @@ const handleModelUploadAndSave = async (
     });
 
     if (updatedModel) {
+      console.log("MODEL_COMPLETED_EMAIL_FLOW", {
+        modelId: model.id,
+        userId: model.user_id,
+      });
+
       const user = await getUser(model.user_id);
-      if (user?.email) {
-        await sendEmail({
-          to: user.email,
-          subject: "Your PrintPetz model is ready",
-          html: `<p>Hi${user.name ? ` ${user.name}` : ""},</p><p>Your PrintPetz pet model has finished training and is ready to use.</p><p>Head back to PrintPetz to start generating images.</p>`,
+
+      if (!user) {
+        console.error("MODEL_EMAIL_USER_NOT_FOUND", {
+          modelId: model.id,
+          userId: model.user_id,
         });
+        return;
       }
+
+      if (!user.email) {
+        console.error("MODEL_EMAIL_ADDRESS_MISSING", {
+          modelId: model.id,
+          userId: model.user_id,
+        });
+        return;
+      }
+
+      const sent = await sendEmail({
+        to: user.email,
+        subject: "Your PrintPetz model is ready",
+        html: `<p>Hi${user.name ? ` ${user.name}` : ""},</p><p>Your PrintPetz pet model has finished training and is ready to use.</p><p>Head back to PrintPetz to start generating images.</p>`,
+      });
+
+      console.log("MODEL_COMPLETION_EMAIL_RESULT", {
+        modelId: model.id,
+        userId: model.user_id,
+        sent,
+      });
     }
   }
 };
