@@ -10,11 +10,12 @@ interface ISendEmailInput {
 
 export const sendEmail = async ({ to, subject, html }: ISendEmailInput) => {
   const apiKey = process.env.RESEND_API_KEY;
-  const from = process.env.EMAIL_FROM;
+  const from = process.env.EMAIL_FROM ?? process.env.RESEND_FROM_EMAIL;
 
   if (!apiKey || !from) {
     await addErrorLog({
-      error: "Email service is not configured. RESEND_API_KEY and EMAIL_FROM are required.",
+      error:
+        "Email service is not configured. RESEND_API_KEY and EMAIL_FROM or RESEND_FROM_EMAIL are required.",
       input: JSON.stringify({ to, subject }),
       type: "EMAIL_CONFIG_MISSING",
     });
