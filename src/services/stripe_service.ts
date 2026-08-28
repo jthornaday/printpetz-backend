@@ -62,7 +62,10 @@ export const createStripeCustomer = async (user: IUser) => {
 export const createCheckoutSession = async (input: CheckoutSessionProps) => {
   const { price, redirectUrl, metadata, stripeCustomerId } = input;
 
-  const successUrl = `${redirectUrl}?id=${price.id}&session_id={CHECKOUT_SESSION_ID}&success=true`;
+  // Successful purchases should return users to the creation flow, not back to
+  // the credit purchase page. Keep the original page as the cancel destination.
+  const clientBaseUrl = AppConstants.clientBaseUrl.replace(/\/$/, "");
+  const successUrl = `${clientBaseUrl}/create?purchase=success&id=${price.id}&session_id={CHECKOUT_SESSION_ID}`;
   const failedUrl = `${redirectUrl}?id=${price.id}&success=false`;
 
   const session = await stripe.checkout.sessions.create({
