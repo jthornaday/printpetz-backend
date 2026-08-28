@@ -77,3 +77,28 @@ export const handleGenerateImage = async (prompt: string, path: string) => {
     throw error;
   }
 };
+
+export const handleRemoveBackground = async (imageUrl: string) => {
+  try {
+    const result = await fal.subscribe("fal-ai/imageutils/rembg", {
+      input: {
+        image_url: imageUrl,
+        crop_to_bbox: false,
+      },
+    });
+
+    const image = (result.data as { image?: { url?: string } })?.image;
+    if (!image?.url) {
+      throw new Error("Background removal did not return an image");
+    }
+
+    return image.url;
+  } catch (error) {
+    addErrorLog({
+      input: JSON.stringify({ imageUrl }),
+      error: JSON.stringify({ error }),
+      type: "BACKGROUND_REMOVAL",
+    });
+    throw error;
+  }
+};
