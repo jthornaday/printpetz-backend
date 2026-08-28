@@ -12,7 +12,7 @@ import { generateImageSchema } from "@/utils/validation/generation_validation_sc
 
 const createImage = AsyncHandler.handle(async (req, res) => {
   const user = req.user;
-  const { numberOfImages, styleId, modelId } = generateImageSchema.parse(
+  const { numberOfImages, styleId, modelId, cutenessLevel } = generateImageSchema.parse(
     req.body,
   );
 
@@ -42,7 +42,7 @@ const createImage = AsyncHandler.handle(async (req, res) => {
   );
   const generations = await Promise.all(
     Array.from({ length: numberOfImages }).map(async () => {
-      const prompt = generateIdentityPrompt(subject);
+      const prompt = generateIdentityPrompt(subject, cutenessLevel);
       const requestId = await handleGenerateImage(prompt, model.model_path);
 
       return addGeneration({
