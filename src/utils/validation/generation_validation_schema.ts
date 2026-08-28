@@ -8,7 +8,7 @@ const generateImageSchema = Zod.object({
   })
     .min(1)
     .max(4),
-  cutenessLevel: Zod.number().int().min(1).max(3).default(2),
+  cutenessLevel: Zod.number().int().min(1).max(5).default(2),
 });
 
 export { generateImageSchema };
