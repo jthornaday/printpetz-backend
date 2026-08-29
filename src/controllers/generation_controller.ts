@@ -1,6 +1,11 @@
 import AppConstants from "@/constants/app_constants";
 import AsyncHandler from "@/context/async_handler";
-import { handleGenerateImage, handleRemoveBackground } from "@/services/fal_service";
+import {
+  EditorLook,
+  handleEditImageLook,
+  handleGenerateImage,
+  handleRemoveBackground,
+} from "@/services/fal_service";
 import { addGeneration } from "@/services/generation_service";
 import { getModelById } from "@/services/model_service";
 import { getStyleById } from "@/services/style_service";
@@ -71,6 +76,27 @@ const createImage = AsyncHandler.handle(async (req, res) => {
   res.dataCreateSuccess({ data: { generations } });
 });
 
+const editLook = AsyncHandler.handle(async (req, res) => {
+  const { imageUrl, look } = req.body ?? {};
+  const validLooks: EditorLook[] = ["natural", "mascot", "cartoon"];
+
+  if (!imageUrl || typeof imageUrl !== "string") {
+    throw errorResponse.Api400Error({
+      errorDescription: "A valid image URL is required",
+    });
+  }
+
+  if (!validLooks.includes(look as EditorLook)) {
+    throw errorResponse.Api400Error({
+      errorDescription: "Look must be natural, mascot, or cartoon",
+    });
+  }
+
+  // Editor look changes intentionally do not deduct user credits.
+  const editedImageUrl = await handleEditImageLook(imageUrl, look as EditorLook);
+  res.dataCreateSuccess({ data: { imageUrl: editedImageUrl } });
+});
+
 const removeBackground = AsyncHandler.handle(async (req, res) => {
   const { imageUrl } = req.body ?? {};
 
@@ -84,4 +110,4 @@ const removeBackground = AsyncHandler.handle(async (req, res) => {
   res.dataCreateSuccess({ data: { imageUrl: imageUrlWithoutBackground } });
 });
 
-export { createImage, removeBackground };
+export { createImage, editLook, removeBackground };
