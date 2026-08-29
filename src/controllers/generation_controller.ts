@@ -42,7 +42,12 @@ const createImage = AsyncHandler.handle(async (req, res) => {
   );
   const generations = await Promise.all(
     Array.from({ length: numberOfImages }).map(async () => {
-      const prompt = generateIdentityPrompt(subject, cutenessLevel);
+      const prompt = generateIdentityPrompt(
+        subject,
+        cutenessLevel,
+        model.name,
+        style.name,
+      );
       const requestId = await handleGenerateImage(prompt, model.model_path);
 
       return addGeneration({
