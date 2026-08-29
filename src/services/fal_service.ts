@@ -78,6 +78,49 @@ export const handleGenerateImage = async (
   }
 };
 
+export type EditorLook = "natural" | "mascot" | "cartoon";
+
+const getEditorLookPrompt = (look: EditorLook) => {
+  const shared =
+    "Edit this existing PrintPetz image only. Preserve the same pet identity, face markings, coat colors, ears, muzzle, pose, outfit, role, composition, background, and existing equipment placement as closely as possible. Do not add extra limbs, human hands, fingers, floating objects, duplicate equipment, logos, or new text.";
+
+  if (look === "natural") {
+    return `${shared} Make the pet rendering NATURAL: realistic pet facial proportions, normal eye size, true muzzle and ear shape, realistic fur texture, and real animal paws rather than furry human hands. Keep the same anthropomorphic role and wardrobe.`;
+  }
+
+  if (look === "cartoon") {
+    return `${shared} Make the pet rendering CARTOON: polished animated illustration, smoother shapes, more expressive but still recognizable facial features, simplified fur detail, and tasteful character exaggeration. Keep the same role and wardrobe.`;
+  }
+
+  return `${shared} Make the pet rendering MASCOT: polished professional mascot styling, strongly recognizable pet identity, faithful markings and ears, modest expressive stylization, balanced proportions, and merchandise-ready finish. Keep the same role and wardrobe.`;
+};
+
+export const handleEditImageLook = async (imageUrl: string, look: EditorLook) => {
+  try {
+    const result = await fal.subscribe("fal-ai/flux-kontext/dev", {
+      input: {
+        image_url: imageUrl,
+        prompt: getEditorLookPrompt(look),
+      },
+    });
+
+    const images = (result.data as { images?: Array<{ url?: string }> })?.images;
+    const editedUrl = images?.[0]?.url;
+    if (!editedUrl) {
+      throw new Error("Image editor did not return an image");
+    }
+
+    return editedUrl;
+  } catch (error) {
+    addErrorLog({
+      input: JSON.stringify({ imageUrl, look }),
+      error: JSON.stringify({ error }),
+      type: "IMAGE_EDITOR_LOOK",
+    });
+    throw error;
+  }
+};
+
 export const handleRemoveBackground = async (imageUrl: string) => {
   try {
     const result = await fal.subscribe("fal-ai/imageutils/rembg", {
