@@ -66,29 +66,17 @@ export const createTrainingZip = async ({
   }
 };
 
-const getCutenessPrompt = (cutenessLevel: number) => {
-  if (cutenessLevel === 1) {
-    return "NATURAL MODE: preserve realistic pet facial proportions, normal eye size, normal head size, and realistic fur detail. Do not use chibi, toy-like, baby-animal, oversized-eye, or oversized-head proportions. Only the body, wardrobe, pose, and scene should transform into the selected concept.";
+const getLookPrompt = (lookLevel: number) => {
+  if (lookLevel === 1) {
+    return "NATURAL LOOK: keep the exact same full anthropomorphic role transformation, wardrobe, pose, equipment, and participant body language, but make the pet's face stay as close as possible to the real trained pet. Preserve realistic facial proportions, normal eye size, natural head size, true muzzle length and shape, exact ear shape, nose, coat texture, coat pattern, markings, and eye color. Do not reduce the anthropomorphism: this must still clearly be the pet actively functioning as the boxer, baseball player, golfer, doctor, firefighter, or other selected role. Avoid chibi, mascot exaggeration, toy-like anatomy, giant eyes, or an oversized head.";
   }
 
-  if (cutenessLevel === 2) {
-    return "CUTE MODE: keep the pet's real facial proportions and recognizable likeness dominant. Use normal-sized eyes and a nearly natural head size, with only subtle softening and charm. Do not use chibi proportions, giant eyes, a huge head, tiny legs, toy-like anatomy, or a baby-animal look. The character should feel like the real pet convincingly transformed into the selected role.";
+  if (lookLevel === 3) {
+    return "CARTOON LOOK: keep the exact same full anthropomorphic role transformation, wardrobe, pose, equipment, and participant body language, but render the pet with a clearly illustrated animated-cartoon treatment. Allow more expressive eyes, smoother shapes, simplified fur detail, and tasteful exaggerated character proportions while preserving the pet's defining facial markings, ear shape, muzzle, nose, coat colors and pattern, and overall identity. The pet must still unmistakably perform the selected role rather than merely attend the scene.";
   }
 
-  if (cutenessLevel === 3) {
-    return "EXTRA CUTE MODE: add moderate mascot charm with a modestly larger head, gently more expressive eyes, softer friendly features, and slightly compact proportions, but keep the pet clearly recognizable and avoid extreme chibi or toy-like anatomy.";
-  }
-
-  if (cutenessLevel === 4) {
-    return "SUPER CUTE MODE: make the character clearly mascot-like with a larger head, bigger expressive eyes, softer rounded features, compact proportions, and polished animated-character appeal while preserving the pet's defining face, coat pattern, ears, muzzle, nose, and eye color.";
-  }
-
-  if (cutenessLevel === 5) {
-    return "STOP IT, CUTE!: maximize adorable mascot appeal while preserving the pet's identity. Use noticeably enlarged expressive eyes, a larger head, soft rounded facial features, compact charming body proportions, playful premium character styling, and strong animated-mascot energy. Keep the pet unmistakably recognizable and avoid malformed anatomy or losing its real markings, ears, muzzle, nose, coat pattern, or eye color.";
-  }
-
-  return "Keep the pet recognizable and use a restrained cute treatment.";
+  return "MASCOT LOOK: keep the exact same full anthropomorphic role transformation, wardrobe, pose, equipment, and participant body language. Render the pet as a polished professional mascot: strongly recognizable as the real pet, with faithful coat pattern, markings, ears, muzzle, nose, and eye color, plus modestly enhanced expression and clean merchandise-ready character styling. Use balanced mascot proportions without giant eyes, extreme chibi, toy-like anatomy, or losing the pet's identity. The pet must clearly be the boxer, baseball player, golfer, doctor, firefighter, or other selected role.";
 };
 
-export const generateIdentityPrompt = (subject: string, cutenessLevel = 2) =>
-  `${subject}. IMPORTANT PRINTPETZ CHARACTER RULES: fully transform the trained pet into the selected role, outfit, pose, and environment described above. For sports and human-like roles, the pet must read as the actual participant, not a pet attending the event. Use an upright anthropomorphic body with believable shoulders, torso, arms, paws or hands, and role-appropriate wardrobe. Frame primarily from the waist or chest up unless the selected concept requires otherwise. Any equipment or prop must be visibly and anatomically supported, correctly gripped, worn, or resting on a believable surface; never allow floating, intersecting, or unsupported props. Do not recreate the original training-photo background, camera angle, pose, people, hands, furniture, blankets, couches, or setting. Do not show spectators or unrelated people. Do not invent real team logos, letters, trademarks, or recognizable professional sports branding unless licensed branding is explicitly supplied. Preserve the pet's identity: coat colors and pattern, facial markings, eye color, ear shape, muzzle shape, nose, and recognizable facial structure. Show one pet only. ${getCutenessPrompt(cutenessLevel)} Use a clean, simplified, purpose-built environment that supports the selected role without looking like a candid real-world snapshot. The result should feel like polished, premium, merchandise-ready PrintPetz artwork.`;
+export const generateIdentityPrompt = (subject: string, lookLevel = 2) =>
+  `${subject}. IMPORTANT PRINTPETZ CHARACTER RULES: fully transform the trained pet into the selected role, outfit, pose, and environment described above. For sports and human-like roles, the pet must read as the actual participant, not a pet attending the event. Use an upright anthropomorphic body with believable shoulders, torso, arms, paws or hands, and role-appropriate wardrobe. Frame primarily from the waist or chest up unless the selected concept requires otherwise. Any equipment or prop must be visibly and anatomically supported, correctly gripped, worn, or resting on a believable surface; never allow floating, intersecting, or unsupported props. Do not recreate the original training-photo background, camera angle, pose, people, hands, furniture, blankets, couches, or setting. Do not show spectators or unrelated people. Do not invent real team logos, letters, trademarks, or recognizable professional sports branding unless licensed branding is explicitly supplied. Preserve the pet's identity: coat colors and pattern, facial markings, eye color, ear shape, muzzle shape, nose, and recognizable facial structure. Show one pet only. ${getLookPrompt(lookLevel)} Use a clean, simplified, purpose-built environment that supports the selected role without looking like a candid real-world snapshot. The result should feel like polished, premium, merchandise-ready PrintPetz artwork.`;
