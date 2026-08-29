@@ -1,6 +1,7 @@
 type RoleBlueprint = {
   aliases: string[];
   prompt: string;
+  negative?: string;
 };
 
 const roleBlueprints: RoleBlueprint[] = [
@@ -8,46 +9,64 @@ const roleBlueprints: RoleBlueprint[] = [
     aliases: ["baseball"],
     prompt:
       "BASEBALL POSE BLUEPRINT: render exactly one baseball bat if a bat is present. Use a conventional batter stance with the upper body clearly visible, both forepaws/hands wrapped around the bat handle next to each other, elbows bent naturally, and the barrel extending away from the body. The bat must never float, pass through the face or torso, split into multiple bats, or be gripped by only one unsupported paw. If fielding instead, show exactly one glove worn naturally on one hand and no bat. Prefer a waist-up or three-quarter composition that keeps both hands and all equipment fully visible.",
+    negative:
+      "floating baseball bat, duplicate bat, broken bat, bent bat, bat through body, bat through face, bat through arm, detached paw, missing hand on bat, one-handed unsupported batting pose, glove and bat fused together",
   },
   {
     aliases: ["golf", "golfer"],
     prompt:
       "GOLF POSE BLUEPRINT: render exactly one golf club. Both forepaws/hands must be joined correctly on the grip with believable wrist, elbow, shoulder, and torso alignment. Use a realistic address, backswing, impact, or follow-through pose. The shaft must remain continuous and straight, must not pass through the body, and the club head must remain attached. Prefer a three-quarter or full-body composition that keeps the hands and club visible.",
+    negative:
+      "floating golf club, duplicate golf club, broken shaft, bent shaft, detached club head, club through body, missing hand on grip, impossible golf grip",
   },
   {
     aliases: ["boxing", "boxer"],
     prompt:
       "BOXING POSE BLUEPRINT: show exactly two boxing gloves, one correctly fitted to each hand. Use a believable boxing guard, jab, cross, or victory pose with anatomically coherent shoulders, elbows, wrists, and fists. Gloves must never float, duplicate, merge with the face, or appear unattached. Keep both arms clearly readable and avoid crossed or tangled limbs. Prefer a waist-up or three-quarter composition.",
+    negative:
+      "floating boxing glove, duplicate boxing glove, detached glove, glove merged with face, missing glove, tangled arms, crossed impossible arms, extra fist",
   },
   {
     aliases: ["football"],
     prompt:
       "FOOTBALL POSE BLUEPRINT: if holding a football, show exactly one football securely cradled against the body or gripped naturally by one hand with the other arm supporting the athletic pose. Keep shoulders, elbows, wrists, and ball placement anatomically believable. The football must not float, intersect the torso, duplicate, or replace a hand. Prefer a waist-up or three-quarter player composition.",
+    negative:
+      "floating football, duplicate football, football through torso, football replacing hand, detached hand, impossible ball grip",
   },
   {
     aliases: ["basketball"],
     prompt:
       "BASKETBALL POSE BLUEPRINT: render exactly one basketball. Place it naturally in one or both hands for a hold, pass, shot setup, or dribble pose. Hands must make physical contact with the ball and fingers/paws must not merge into it. Do not duplicate or float the ball. Keep both arms and the ball clearly visible.",
+    negative:
+      "floating basketball, duplicate basketball, basketball fused with hand, basketball through body, detached hand, impossible ball grip",
   },
   {
     aliases: ["soccer", "footballer"],
     prompt:
       "SOCCER POSE BLUEPRINT: render exactly one soccer ball. Use a believable dribble, trap, pass, strike, or poised player stance with anatomically coherent legs and feet. The ball must be physically located on or near the playing surface, never floating or intersecting a leg. Prefer a three-quarter or full-body composition when the ball is included.",
+    negative:
+      "floating soccer ball, duplicate soccer ball, ball through leg, ball fused with foot, extra leg, impossible kicking pose",
   },
   {
     aliases: ["hockey"],
     prompt:
       "HOCKEY POSE BLUEPRINT: render exactly one hockey stick. Both gloved hands must grip the shaft in a believable hockey position with coherent elbows and shoulders. The stick must remain continuous, must not pass through the body, and must not float. If a puck is shown, use exactly one puck on the ice near the blade. Prefer a three-quarter or full-body composition.",
+    negative:
+      "floating hockey stick, duplicate hockey stick, broken hockey stick, stick through body, missing hand on stick, floating puck, duplicate puck",
   },
   {
     aliases: ["cricket"],
     prompt:
       "CRICKET POSE BLUEPRINT: if batting, render exactly one cricket bat held correctly with both hands together on the handle, with believable arm and shoulder alignment. The bat must remain continuous and must not float or intersect the body. If fielding instead, omit the bat and use a clean athletic fielding pose. Prefer a three-quarter composition that keeps both hands and equipment visible.",
+    negative:
+      "floating cricket bat, duplicate cricket bat, broken cricket bat, bat through body, missing hand on bat, impossible batting grip",
   },
   {
     aliases: ["skateboard", "skateboarding", "skater"],
     prompt:
       "SKATEBOARD POSE BLUEPRINT: render exactly one skateboard with both feet placed believably on or immediately above the deck according to the trick. Keep knees, hips, ankles, and board orientation coherent. The board must not duplicate, bend through the body, or float independently of the rider. Prefer a full-body composition.",
+    negative:
+      "floating skateboard, duplicate skateboard, bent skateboard through body, detached foot, extra leg, impossible foot placement",
   },
   {
     aliases: ["doctor", "physician"],
@@ -76,13 +95,17 @@ const roleBlueprints: RoleBlueprint[] = [
   },
 ];
 
-export const getRoleBlueprintPrompt = (styleName?: string) => {
-  if (!styleName) return "";
+const findRoleBlueprint = (styleName?: string) => {
+  if (!styleName) return undefined;
 
   const normalized = styleName.trim().toLowerCase();
-  const blueprint = roleBlueprints.find(({ aliases }) =>
+  return roleBlueprints.find(({ aliases }) =>
     aliases.some((alias) => normalized.includes(alias)),
   );
-
-  return blueprint?.prompt ?? "";
 };
+
+export const getRoleBlueprintPrompt = (styleName?: string) =>
+  findRoleBlueprint(styleName)?.prompt ?? "";
+
+export const getRoleNegativePrompt = (styleName?: string) =>
+  findRoleBlueprint(styleName)?.negative ?? "";
