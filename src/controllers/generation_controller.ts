@@ -48,7 +48,11 @@ const createImage = AsyncHandler.handle(async (req, res) => {
         model.name,
         style.name,
       );
-      const requestId = await handleGenerateImage(prompt, model.model_path);
+      const requestId = await handleGenerateImage(
+        prompt,
+        model.model_path,
+        style.name,
+      );
 
       return addGeneration({
         group_id,
