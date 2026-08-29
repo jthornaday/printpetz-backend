@@ -1,6 +1,7 @@
 import { fal } from "@fal-ai/client";
 
 import AppConstants from "@/constants/app_constants";
+import { getRoleNegativePrompt } from "@/utils/role_blueprints";
 
 import { addErrorLog } from "./error_logs_service";
 
@@ -8,8 +9,6 @@ fal.config({ credentials: AppConstants.falApiKey });
 
 export const handleTrainModel = async (datasetUrl: Blob, name: string) => {
   try {
-    // 400 steps is a faster production balance than the previous 500 while
-    // still leaving enough training iterations for pet identity retention.
     const input = {
       images_data_url: datasetUrl,
       trigger_word: "TOK",
@@ -25,9 +24,7 @@ export const handleTrainModel = async (datasetUrl: Blob, name: string) => {
 
     console.log({ result });
 
-    const requestId = result.request_id;
-
-    return requestId;
+    return result.request_id;
   } catch (error) {
     addErrorLog({
       input: JSON.stringify({}),
@@ -38,21 +35,23 @@ export const handleTrainModel = async (datasetUrl: Blob, name: string) => {
   }
 };
 
-export const handleGenerateImage = async (prompt: string, path: string) => {
+export const handleGenerateImage = async (
+  prompt: string,
+  path: string,
+  styleName?: string,
+) => {
   try {
     const isFluxModel = path.includes("/flux/");
     const endpoint = isFluxModel ? "fal-ai/flux-lora" : "fal-ai/qwen-image";
+    const roleNegativePrompt = getRoleNegativePrompt(styleName);
+    const baseNegativePrompt =
+      "blurry, low resolution, low quality, watermark, logo, unintended text, cropped face, out of frame, distorted face, deformed anatomy, duplicate animal, multiple pets, extra limbs, extra ears, extra eyes, giant eyes, oversized cartoon eyes, extreme chibi, toy-like anatomy, photorealistic candid snapshot, spectators, crowd, unrelated people, couch, blanket, furniture, source photo background, floating object, unsupported prop, intersecting prop, duplicated prop, broken prop, missing uniform";
 
     const result = await fal.queue.submit(endpoint, {
       input: {
         prompt,
-        // Preserve the trained pet while leaving the prompt room to control
-        // wardrobe, pose, props, and background.
         loras: [{ path, scale: isFluxModel ? 0.95 : 1.0 }],
         num_images: 1,
-        // Reduce inference work from 30/40 to 24/32 for quicker generation.
-        // FAL's FLUX LoRA defaults are around 28 steps, so 24 remains a
-        // conservative quality/speed tradeoff rather than an extreme cut.
         num_inference_steps: isFluxModel ? 24 : 32,
         guidance_scale: isFluxModel ? 4.0 : 2.5,
         ...(isFluxModel ? { acceleration: "regular" as const } : {}),
@@ -61,8 +60,9 @@ export const handleGenerateImage = async (prompt: string, path: string) => {
           width: 820,
           height: 1024,
         },
-        negative_prompt:
-          "blurry, low resolution, low quality, watermark, logo, text, cropped face, out of frame, distorted face, deformed anatomy, duplicate animal, multiple pets, extra limbs, extra ears, extra eyes, giant eyes, oversized cartoon eyes, extreme chibi, toy-like anatomy, photorealistic candid snapshot, spectators, crowd, unrelated people, couch, blanket, furniture, source photo background, floating object, floating bat, unsupported prop, intersecting prop, missing uniform",
+        negative_prompt: roleNegativePrompt
+          ? `${baseNegativePrompt}, ${roleNegativePrompt}`
+          : baseNegativePrompt,
       },
       webhookUrl: `${AppConstants.serverBaseUrl}/webhook/fal/generation-result`,
     });
@@ -70,7 +70,7 @@ export const handleGenerateImage = async (prompt: string, path: string) => {
     return result.request_id;
   } catch (error) {
     addErrorLog({
-      input: JSON.stringify({ prompt, path }),
+      input: JSON.stringify({ prompt, path, styleName }),
       error: JSON.stringify({ error }),
       type: "IMAGE_GENERATION",
     });
