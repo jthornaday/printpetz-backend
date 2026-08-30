@@ -86,6 +86,27 @@ export const updateGeneration = async (input: Partial<IGeneration>) => {
   return data;
 };
 
+export const deleteGenerationForUser = async (id: number, userId: string) => {
+  const { data, error } = await supabase
+    .from(tables.generations)
+    .delete()
+    .eq("id", id)
+    .eq("user_id", userId)
+    .select("id")
+    .maybeSingle();
+
+  if (error) {
+    addErrorLog({
+      error: JSON.stringify(error),
+      input: JSON.stringify({ id, userId }),
+      type: "DELETE_GENERATION",
+    });
+    throw error;
+  }
+
+  return Boolean(data);
+};
+
 const handleImageUploadAndSave = async (
   image: QwenImageOutput["images"][number],
   generation: IGeneration,
