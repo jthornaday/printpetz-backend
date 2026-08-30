@@ -10,7 +10,7 @@ import { modelTrainingSchema } from "@/utils/validation/model_training_validatio
 
 const trainModel = AsyncHandler.handle(async (req, res) => {
   const user = req.user;
-  const { images, name } = modelTrainingSchema.parse(req.body);
+  const { images, name, petName } = modelTrainingSchema.parse(req.body);
 
   const modelTrainingCharge = AppConstants.modelTrainingCredit;
   const hasEnoughCredit = user.credits >= modelTrainingCharge;
@@ -21,22 +21,18 @@ const trainModel = AsyncHandler.handle(async (req, res) => {
     });
   }
 
-  // Create a zip file from images
   const imagesBlob = await createTrainingZip({ imageUrls: images });
-
-  // Train model
   const requestId = await handleTrainModel(imagesBlob, name);
 
-  // Add model info to DB
   const model = await addModel({
     user_id: user.id,
     name,
+    pet_name: petName,
     request_id: requestId,
     status: EModelStatus.TRAINING,
     training_images: images,
   });
 
-  // Cut credits from user
   await updateUserCredit(user.id, modelTrainingCharge, false);
 
   res.dataCreateSuccess({ data: { model } });
