@@ -36,6 +36,28 @@ export const addGeneration = async (input: Partial<IGeneration>) => {
   return data;
 };
 
+export const getGenerationById = async (id: number) => {
+  const { data, error } = await retrySupabase<IGeneration>(
+    async () =>
+      await supabase
+        .from(tables.generations)
+        .select("*")
+        .eq("id", id)
+        .single(),
+  );
+
+  if (error) {
+    addErrorLog({
+      error: JSON.stringify(error),
+      input: JSON.stringify({ id }),
+      type: "GET_GENERATION_BY_ID",
+    });
+    return null;
+  }
+
+  return data;
+};
+
 export const getGenerationByRequestId = async (requestId: string) => {
   const { data, error } = await retrySupabase<IGeneration>(
     async () =>
