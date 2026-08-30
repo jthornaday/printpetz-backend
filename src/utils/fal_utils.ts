@@ -79,8 +79,26 @@ const getLookPrompt = (lookLevel: number) => {
   return "MASCOT LOOK: keep the exact same full anthropomorphic role transformation, wardrobe, pose, equipment, and participant body language. Render the pet as a polished professional mascot: strongly recognizable as the real pet, with faithful coat pattern, markings, ears, muzzle, nose, and eye color, plus modestly enhanced expression and clean merchandise-ready character styling. Use balanced mascot proportions without giant eyes, extreme chibi, toy-like anatomy, or losing the pet's identity. The pet must clearly perform the selected role.";
 };
 
+// Existing model labels sometimes include a training/version suffix such as
+// "Max 2", "Max 3", "Max v4", or "Max (4)". Those labels are useful for
+// distinguishing models internally, but the version must never appear as the
+// pet's jersey/uniform name. Until pet_name is stored separately in the DB,
+// derive a safe display name from the model label for personalization only.
+const getPetDisplayName = (modelName?: string) => {
+  const cleanName = modelName?.trim();
+  if (!cleanName) return "";
+
+  const withoutVersion = cleanName
+    .replace(/\s+\(\d+\)$/i, "")
+    .replace(/\s+v\s*\d+$/i, "")
+    .replace(/\s+\d+$/i, "")
+    .trim();
+
+  return withoutVersion || cleanName;
+};
+
 const getPetNamePrompt = (petName?: string, styleName?: string) => {
-  const cleanName = petName?.trim();
+  const cleanName = getPetDisplayName(petName);
   if (!cleanName) return "";
 
   const upperName = cleanName.toUpperCase();
