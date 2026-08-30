@@ -66,6 +66,7 @@ const createImage = AsyncHandler.handle(async (req, res) => {
     });
   }
 
+  const petName = model.pet_name?.trim() || model.name;
   const group_id = Date.now();
   const generations = await Promise.all(
     Array.from({ length: numberOfImages }).map(async (_, imageIndex) => {
@@ -78,7 +79,7 @@ const createImage = AsyncHandler.handle(async (req, res) => {
       const prompt = generateIdentityPrompt(
         subject,
         cutenessLevel,
-        model.name,
+        petName,
         style.name,
       );
       const requestId = await handleGenerateImage(
