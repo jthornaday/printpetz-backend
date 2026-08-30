@@ -6,7 +6,11 @@ import {
   handleGenerateImage,
   handleRemoveBackground,
 } from "@/services/fal_service";
-import { addGeneration } from "@/services/generation_service";
+import {
+  addGeneration,
+  getGenerationById,
+} from "@/services/generation_service";
+import { getFileBufferFromUrl } from "@/services/file_service";
 import { getModelById } from "@/services/model_service";
 import { getStyleById } from "@/services/style_service";
 import { updateUserCredit } from "@/services/user_service";
@@ -24,9 +28,6 @@ const getGenerationSubject = (
   const triggerWord = `TOK ${modelName}`;
   const normalizedStyle = styleName.trim().toLowerCase();
 
-  // Baseball needs mutually exclusive equipment/action families. The database
-  // prompt historically requested both a bat and a glove, which encourages
-  // fused anatomy and mixed-role poses. Keep each generated image coherent.
   if (normalizedStyle.includes("baseball")) {
     const isBatting = imageIndex % 2 === 0;
 
@@ -103,6 +104,40 @@ const createImage = AsyncHandler.handle(async (req, res) => {
   res.dataCreateSuccess({ data: { generations } });
 });
 
+const downloadImage = AsyncHandler.handle(async (req, res) => {
+  const generationId = Number(req.params.id);
+  if (!Number.isInteger(generationId) || generationId <= 0) {
+    throw errorResponse.Api400Error({ errorDescription: "Invalid generation id" });
+  }
+
+  const generation = await getGenerationById(generationId);
+  if (!generation || generation.user_id !== req.user.id || !generation.image) {
+    throw errorResponse.Api404Error({ errorDescription: "Image not found" });
+  }
+
+  const imageUrl = generation.image;
+  const pathname = new URL(imageUrl).pathname;
+  const rawExtension = pathname.split(".").pop()?.toLowerCase();
+  const extension = rawExtension && ["png", "jpg", "jpeg", "webp", "gif"].includes(rawExtension)
+    ? rawExtension === "jpeg" ? "jpg" : rawExtension
+    : "png";
+
+  const contentTypes: Record<string, string> = {
+    png: "image/png",
+    jpg: "image/jpeg",
+    webp: "image/webp",
+    gif: "image/gif",
+  };
+
+  const buffer = await getFileBufferFromUrl(imageUrl, contentTypes[extension]);
+  const filename = `printpetz_${generation.id}_${Date.now()}.${extension}`;
+
+  res.setHeader("Content-Type", contentTypes[extension] ?? "application/octet-stream");
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  res.setHeader("Content-Length", buffer.length.toString());
+  res.send(buffer);
+});
+
 const editLook = AsyncHandler.handle(async (req, res) => {
   const { imageUrl, look } = req.body ?? {};
   const validLooks: EditorLook[] = ["natural", "mascot", "cartoon"];
@@ -119,7 +154,6 @@ const editLook = AsyncHandler.handle(async (req, res) => {
     });
   }
 
-  // Editor look changes intentionally do not deduct user credits.
   const editedImageUrl = await handleEditImageLook(imageUrl, look as EditorLook);
   res.dataCreateSuccess({ data: { imageUrl: editedImageUrl } });
 });
@@ -137,4 +171,4 @@ const removeBackground = AsyncHandler.handle(async (req, res) => {
   res.dataCreateSuccess({ data: { imageUrl: imageUrlWithoutBackground } });
 });
 
-export { createImage, editLook, removeBackground };
+export { createImage, downloadImage, editLook, removeBackground };
