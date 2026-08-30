@@ -80,27 +80,31 @@ export const handleGenerateImage = async (
 
 export type EditorLook = "natural" | "mascot" | "cartoon";
 
-const getEditorLookPrompt = (look: EditorLook) => {
-  const shared =
-    "Edit this existing PrintPetz image only. Preserve the same pet identity, face markings, coat colors, ears, muzzle, pose, outfit, role, composition, background, and existing equipment placement as closely as possible. Do not add extra limbs, human hands, fingers, floating objects, duplicate equipment, logos, or new text.";
-
-  if (look === "natural") {
-    return `${shared} Make the pet rendering NATURAL: realistic pet facial proportions, normal eye size, true muzzle and ear shape, realistic fur texture, and real animal paws rather than furry human hands. Keep the same anthropomorphic role and wardrobe.`;
-  }
+const getEditorLookPrompt = (look: Exclude<EditorLook, "natural">) => {
+  const identityLock =
+    "This is a surgical style edit of the exact same individual pet in the source image. The output MUST depict the identical pet, not a similar pet and not a different dog. Preserve the pet's exact breed appearance, skull and head shape, muzzle length and width, nose shape and color, eye shape, eye color, ear shape and position, coat colors, coat pattern, every distinctive facial marking, body proportions, pose, paw positions, expression, wardrobe, role, background, camera framing, and every existing object position. Do not change the pet's identity or anatomy. Do not replace, redraw, reinterpret, or beautify the face. Do not add or remove markings. Do not change the pose or equipment. Do not add human hands, fingers, extra limbs, floating objects, duplicated equipment, logos, or text. Change ONLY the requested rendering style while treating the pet identity, geometry, scene, clothing, and props as locked pixels whenever possible.";
 
   if (look === "cartoon") {
-    return `${shared} Make the pet rendering CARTOON: polished animated illustration, smoother shapes, more expressive but still recognizable facial features, simplified fur detail, and tasteful character exaggeration. Keep the same role and wardrobe.`;
+    return `${identityLock} Apply only a restrained polished animated-cartoon surface treatment: simplify fur rendering slightly, use cleaner illustrated edges and modestly more expressive rendering, but keep the face structure, markings, ears, muzzle, eyes, paws, pose, clothing, and scene unchanged. The pet must remain immediately recognizable as the exact same individual.`;
   }
 
-  return `${shared} Make the pet rendering MASCOT: polished professional mascot styling, strongly recognizable pet identity, faithful markings and ears, modest expressive stylization, balanced proportions, and merchandise-ready finish. Keep the same role and wardrobe.`;
+  return `${identityLock} Apply only a restrained professional mascot surface treatment: cleaner merchandise-ready rendering and modest stylization, while keeping the face structure, markings, ears, muzzle, eyes, paws, pose, clothing, and scene unchanged. Do not enlarge the head or eyes. The pet must remain immediately recognizable as the exact same individual.`;
 };
 
 export const handleEditImageLook = async (imageUrl: string, look: EditorLook) => {
+  // Natural is the original generation. Returning it directly guarantees that
+  // choosing Natural can never mutate the pet into a lookalike.
+  if (look === "natural") return imageUrl;
+
   try {
-    const result = await fal.subscribe("fal-ai/flux-kontext/dev", {
+    const result = await fal.subscribe("fal-ai/flux-pro/kontext", {
       input: {
         image_url: imageUrl,
         prompt: getEditorLookPrompt(look),
+        guidance_scale: 2.0,
+        num_images: 1,
+        output_format: "jpeg" as const,
+        enhance_prompt: false,
       },
     });
 
