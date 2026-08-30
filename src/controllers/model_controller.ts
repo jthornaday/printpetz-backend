@@ -11,6 +11,7 @@ import { modelTrainingSchema } from "@/utils/validation/model_training_validatio
 const trainModel = AsyncHandler.handle(async (req, res) => {
   const user = req.user;
   const { images, name, petName } = modelTrainingSchema.parse(req.body);
+  const resolvedPetName = petName?.trim() || name.trim();
 
   const modelTrainingCharge = AppConstants.modelTrainingCredit;
   const hasEnoughCredit = user.credits >= modelTrainingCharge;
@@ -27,7 +28,7 @@ const trainModel = AsyncHandler.handle(async (req, res) => {
   const model = await addModel({
     user_id: user.id,
     name,
-    pet_name: petName,
+    pet_name: resolvedPetName,
     request_id: requestId,
     status: EModelStatus.TRAINING,
     training_images: images,
