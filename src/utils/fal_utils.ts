@@ -79,11 +79,58 @@ const getLookPrompt = (lookLevel: number) => {
   return "MASCOT LOOK: keep the exact same full anthropomorphic role transformation, wardrobe, pose, equipment, and participant body language. Render the pet as a polished professional mascot: strongly recognizable as the real pet, with faithful coat pattern, markings, ears, muzzle, nose, and eye color, plus modestly enhanced expression and clean merchandise-ready character styling. Use balanced mascot proportions without giant eyes, extreme chibi, toy-like anatomy, or losing the pet's identity. The pet must clearly perform the selected role.";
 };
 
-const getPetNamePrompt = (petName?: string) => {
+const getPetNamePrompt = (petName?: string, styleName?: string) => {
   const cleanName = petName?.trim();
   if (!cleanName) return "";
 
-  return ` The pet's name is "${cleanName}". When the selected role includes a natural place for a participant's name, display exactly "${cleanName}" as a tasteful wardrobe or equipment detail—for example on the back of a jersey, a boxing-trunks waistband, a name patch, locker, or other role-appropriate location. Spell the name exactly and do not invent any other words, letters, team names, logos, or branding. Do not force the name into scenes where it would look unnatural.`;
+  const upperName = cleanName.toUpperCase();
+  const normalizedStyle = styleName?.trim().toLowerCase() ?? "";
+
+  let placement =
+    "Place the name on the most natural visible part of the wardrobe or role equipment.";
+
+  if (normalizedStyle.includes("baseball")) {
+    placement =
+      "For baseball, place the name as a clean player nameplate across the upper back of the jersey when the back is visible; otherwise use a small tasteful chest placement.";
+  } else if (normalizedStyle.includes("football")) {
+    placement =
+      "For American football, place the name as a clean player nameplate across the upper back of the jersey when visible.";
+  } else if (normalizedStyle.includes("basketball")) {
+    placement =
+      "For basketball, place the name across the upper back of the jersey when visible, or use a small chest placement if the pose is front-facing.";
+  } else if (normalizedStyle.includes("soccer")) {
+    placement =
+      "For soccer, place the name across the upper back of the jersey when visible, or use a small tasteful chest placement in a front-facing pose.";
+  } else if (normalizedStyle.includes("hockey")) {
+    placement =
+      "For hockey, place the name as a clean player nameplate across the upper back of the jersey when visible.";
+  } else if (normalizedStyle.includes("boxing") || normalizedStyle.includes("boxer")) {
+    placement =
+      "For boxing, place the name cleanly across the trunks waistband or on the robe if one is present.";
+  } else if (normalizedStyle.includes("cricket")) {
+    placement =
+      "For cricket, place the name across the upper back of the shirt when visible, or use a small tasteful chest placement in a front-facing pose.";
+  } else if (normalizedStyle.includes("doctor")) {
+    placement =
+      "For a doctor, place the name as a clean professional name badge or embroidered coat detail.";
+  } else if (normalizedStyle.includes("police")) {
+    placement =
+      "For a police officer, place the name as a tasteful generic nameplate on the uniform without copying a real department badge or insignia.";
+  } else if (normalizedStyle.includes("firefighter")) {
+    placement =
+      "For a firefighter, place the name on a tasteful generic turnout-gear name patch without copying real department branding.";
+  } else if (normalizedStyle.includes("chef")) {
+    placement =
+      "For a chef, embroider the name tastefully on the chef coat.";
+  } else if (normalizedStyle.includes("pilot")) {
+    placement =
+      "For a pilot, place the name on a tasteful generic pilot name badge without copying real airline branding.";
+  } else if (normalizedStyle.includes("astronaut")) {
+    placement =
+      "For an astronaut, place the name on a generic suit name patch without copying real agency logos or mission insignia.";
+  }
+
+  return ` PET NAME PERSONALIZATION: the pet's name is "${cleanName}". Include the readable name "${upperName}" naturally on the outfit whenever the selected role has a believable uniform, jersey, trunks, coat, badge, patch, or similar placement. ${placement} Spell the name exactly as "${upperName}". Keep it legible, integrated into the garment, and proportionate to the design. Do not invent any other words, letters, team names, logos, sponsors, trademarks, or branding. Do not put the name on the pet's fur, face, body, or floating in the background. If no natural wardrobe placement is visible, omit the name rather than placing it unnaturally.`;
 };
 
 export const generateIdentityPrompt = (
@@ -94,5 +141,5 @@ export const generateIdentityPrompt = (
 ) => {
   const roleBlueprint = getRoleBlueprintPrompt(styleName);
 
-  return `${subject}. IMPORTANT PRINTPETZ CHARACTER RULES: fully transform the trained pet into the selected role, outfit, pose, and environment described above. For sports and human-like roles, the pet must read as the actual participant, not a pet attending the event. DEFAULT BODY LANGUAGE: unless the role clearly requires another action, pose the pet upright on its hind legs like a human participant, with a balanced athletic or professional stance, a clear torso, readable shoulders and arms, and both forepaws positioned intentionally for the role. Do not make the pet sit on all fours or look like a normal pet simply wearing clothes. Preserve animal anatomy at the extremities: forepaws must remain true pet paws with pads/claws/fur appropriate to the animal, never human hands, fingers, thumbs, palms, or knuckles. Use an upright anthropomorphic body with believable shoulders, torso, arms, and role-appropriate wardrobe. Any equipment or prop must be visibly and anatomically supported, correctly gripped, worn, or resting on a believable surface; never allow floating, intersecting, duplicated, broken, or unsupported props. Keep the forepaws and role-defining equipment fully visible whenever equipment is central to the pose. If correct prop interaction would require human-like fingers or impossible anatomy, simplify the pose or omit the prop rather than changing the paws into human hands. Do not recreate the original training-photo background, camera angle, pose, people, hands, furniture, blankets, couches, or setting. Do not show spectators or unrelated people. Do not invent real team logos, letters, trademarks, or recognizable professional sports branding unless licensed branding is explicitly supplied. Preserve the pet's identity: coat colors and pattern, facial markings, eye color, ear shape, muzzle shape, nose, and recognizable facial structure. Show one pet only.${getPetNamePrompt(petName)} ${getLookPrompt(lookLevel)} ${roleBlueprint} Use a clean, simplified, purpose-built environment that supports the selected role without looking like a candid real-world snapshot. The result should feel like polished, premium, merchandise-ready PrintPetz artwork.`;
+  return `${subject}. IMPORTANT PRINTPETZ CHARACTER RULES: fully transform the trained pet into the selected role, outfit, pose, and environment described above. For sports and human-like roles, the pet must read as the actual participant, not a pet attending the event. DEFAULT BODY LANGUAGE: unless the role clearly requires another action, pose the pet upright on its hind legs like a human participant, with a balanced athletic or professional stance, a clear torso, readable shoulders and arms, and both forepaws positioned intentionally for the role. Do not make the pet sit on all fours or look like a normal pet simply wearing clothes. Preserve animal anatomy at the extremities: forepaws must remain true pet paws with pads/claws/fur appropriate to the animal, never human hands, fingers, thumbs, palms, or knuckles. Use an upright anthropomorphic body with believable shoulders, torso, arms, and role-appropriate wardrobe. Any equipment or prop must be visibly and anatomically supported, correctly gripped, worn, or resting on a believable surface; never allow floating, intersecting, duplicated, broken, or unsupported props. Keep the forepaws and role-defining equipment fully visible whenever equipment is central to the pose. If correct prop interaction would require human-like fingers or impossible anatomy, simplify the pose or omit the prop rather than changing the paws into human hands. Do not recreate the original training-photo background, camera angle, pose, people, hands, furniture, blankets, couches, or setting. Do not show spectators or unrelated people. Do not invent real team logos, letters, trademarks, or recognizable professional sports branding unless licensed branding is explicitly supplied. Preserve the pet's identity: coat colors and pattern, facial markings, eye color, ear shape, muzzle shape, nose, and recognizable facial structure. Show one pet only.${getPetNamePrompt(petName, styleName)} ${getLookPrompt(lookLevel)} ${roleBlueprint} Use a clean, simplified, purpose-built environment that supports the selected role without looking like a candid real-world snapshot. The result should feel like polished, premium, merchandise-ready PrintPetz artwork.`;
 };
