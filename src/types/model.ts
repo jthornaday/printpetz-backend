@@ -9,6 +9,7 @@ export interface IModel {
   id: number;
   user_id: string;
   name: string;
+  pet_name: string | null;
   training_images: string[];
   model_path: string | null;
   request_id: string | null;
