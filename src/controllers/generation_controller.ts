@@ -15,6 +15,31 @@ import errorResponse from "@/utils/errors/errorResponse";
 import { generateIdentityPrompt } from "@/utils/fal_utils";
 import { generateImageSchema } from "@/utils/validation/generation_validation_schema";
 
+const getGenerationSubject = (
+  basePrompt: string,
+  styleName: string,
+  modelName: string,
+  imageIndex: number,
+) => {
+  const triggerWord = `TOK ${modelName}`;
+  const normalizedStyle = styleName.trim().toLowerCase();
+
+  // Baseball needs mutually exclusive equipment/action families. The database
+  // prompt historically requested both a bat and a glove, which encourages
+  // fused anatomy and mixed-role poses. Keep each generated image coherent.
+  if (normalizedStyle.includes("baseball")) {
+    const isBatting = imageIndex % 2 === 0;
+
+    if (isBatting) {
+      return `Cute ${triggerWord} as an upright anthropomorphic baseball batter, standing on hind legs in a clean conventional batter stance, wearing a full baseball uniform and cap, both animal forepaws making clear contact with exactly one wooden baseball bat, no fielding glove anywhere in the image, epic ballpark background, dramatic lighting, ultra detailed 8K`;
+    }
+
+    return `Cute ${triggerWord} as an upright anthropomorphic baseball fielder, standing on hind legs in a clean athletic fielding stance, wearing a full baseball uniform and cap, exactly one baseball glove naturally fitted over one animal forepaw, no baseball bat anywhere in the image, epic ballpark background, dramatic lighting, ultra detailed 8K`;
+  }
+
+  return basePrompt.replaceAll("[TRIGGER_WORD]", triggerWord);
+};
+
 const createImage = AsyncHandler.handle(async (req, res) => {
   const user = req.user;
   const { numberOfImages, styleId, modelId, cutenessLevel } = generateImageSchema.parse(
@@ -41,12 +66,14 @@ const createImage = AsyncHandler.handle(async (req, res) => {
   }
 
   const group_id = Date.now();
-  const subject = style.base_prompt.replaceAll(
-    "[TRIGGER_WORD]",
-    `TOK ${model.name}`,
-  );
   const generations = await Promise.all(
-    Array.from({ length: numberOfImages }).map(async () => {
+    Array.from({ length: numberOfImages }).map(async (_, imageIndex) => {
+      const subject = getGenerationSubject(
+        style.base_prompt,
+        style.name,
+        model.name,
+        imageIndex,
+      );
       const prompt = generateIdentityPrompt(
         subject,
         cutenessLevel,
