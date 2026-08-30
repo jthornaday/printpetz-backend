@@ -1,6 +1,7 @@
 import { fal } from "@fal-ai/client";
 
 import AppConstants from "@/constants/app_constants";
+import { getPoseReference } from "@/utils/pose_references";
 import { getRoleNegativePrompt } from "@/utils/role_blueprints";
 
 import { addErrorLog } from "./error_logs_service";
@@ -42,19 +43,35 @@ export const handleGenerateImage = async (
 ) => {
   try {
     const isFluxModel = path.includes("/flux/");
-    const endpoint = isFluxModel ? "fal-ai/flux-lora" : "fal-ai/qwen-image";
+    const poseReference = isFluxModel ? getPoseReference(styleName) : undefined;
+    const endpoint = poseReference
+      ? "fal-ai/flux-general"
+      : isFluxModel
+        ? "fal-ai/flux-lora"
+        : "fal-ai/qwen-image";
     const roleNegativePrompt = getRoleNegativePrompt(styleName);
     const baseNegativePrompt =
       "blurry, low resolution, low quality, watermark, logo, unintended text, cropped face, out of frame, distorted face, deformed anatomy, duplicate animal, multiple pets, extra limbs, extra ears, extra eyes, giant eyes, oversized cartoon eyes, extreme chibi, toy-like anatomy, photorealistic candid snapshot, spectators, crowd, unrelated people, couch, blanket, furniture, source photo background, floating object, unsupported prop, intersecting prop, duplicated prop, broken prop, missing uniform";
+    const generationPrompt = poseReference
+      ? `${prompt} ${poseReference.guidance}`
+      : prompt;
 
     const result = await fal.queue.submit(endpoint, {
       input: {
-        prompt,
+        prompt: generationPrompt,
         loras: [{ path, scale: isFluxModel ? 0.95 : 1.0 }],
         num_images: 1,
         num_inference_steps: isFluxModel ? 24 : 32,
         guidance_scale: isFluxModel ? 4.0 : 2.5,
-        ...(isFluxModel ? { acceleration: "regular" as const } : {}),
+        ...(isFluxModel && !poseReference ? { acceleration: "regular" as const } : {}),
+        ...(poseReference
+          ? {
+              reference_image_url: poseReference.url,
+              reference_strength: poseReference.strength,
+              reference_start: 0,
+              reference_end: 0.85,
+            }
+          : {}),
         output_format: "jpeg",
         image_size: {
           width: 820,
