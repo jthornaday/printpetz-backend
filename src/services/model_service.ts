@@ -8,7 +8,7 @@ import { EModelStatus, IModel } from "@/types/model";
 import errorResponse from "@/utils/errors/errorResponse";
 
 import { streamUploadToS3 } from "./aws_service";
-import { sendEmail } from "./email_service";
+import { sendModelReadyEmail } from "./email_service";
 import { addErrorLog } from "./error_logs_service";
 import { getUser, updateUserCredit } from "./user_service";
 
@@ -156,10 +156,13 @@ const handleModelUploadAndSave = async (
         return;
       }
 
-      const sent = await sendEmail({
+      const petName = model.pet_name?.trim() || model.name;
+
+      const sent = await sendModelReadyEmail({
         to: user.email,
-        subject: "Your PrintPetz model is ready",
-        html: `<p>Hi${user.name ? ` ${user.name}` : ""},</p><p>Your PrintPetz pet model has finished training and is ready to use.</p><p>Head back to PrintPetz to start generating images.</p>`,
+        modelId: model.id,
+        petName,
+        recipientName: user.name,
       });
 
       console.log("MODEL_COMPLETION_EMAIL_RESULT", {
