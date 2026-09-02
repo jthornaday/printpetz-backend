@@ -149,7 +149,7 @@ const getPetNamePrompt = (petName?: string, styleName?: string) => {
 
 export const generateIdentityPrompt = (
   subject: string,
-  lookLevel = 2,
+  lookLevel = 1,
   petName?: string,
   styleName?: string,
 ) => {
