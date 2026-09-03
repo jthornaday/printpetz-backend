@@ -17,15 +17,15 @@ import { updateUserCredit } from "@/services/user_service";
 import { EGenerationStatus } from "@/types/generation";
 import errorResponse from "@/utils/errors/errorResponse";
 import { generateIdentityPrompt } from "@/utils/fal_utils";
+import { getModelTriggerWord } from "@/utils/model_utils";
 import { generateImageSchema } from "@/utils/validation/generation_validation_schema";
 
 const getGenerationSubject = (
   basePrompt: string,
   styleName: string,
-  modelName: string,
+  triggerWord: string,
   imageIndex: number,
 ) => {
-  const triggerWord = `TOK ${modelName}`;
   const normalizedStyle = styleName.trim().toLowerCase();
 
   if (normalizedStyle.includes("baseball")) {
@@ -67,13 +67,14 @@ const createImage = AsyncHandler.handle(async (req, res) => {
   }
 
   const petName = model.pet_name?.trim() || model.name;
+  const triggerWord = getModelTriggerWord(model.model_path, model.name);
   const group_id = Date.now();
   const generations = await Promise.all(
     Array.from({ length: numberOfImages }).map(async (_, imageIndex) => {
       const subject = getGenerationSubject(
         style.base_prompt,
         style.name,
-        model.name,
+        triggerWord,
         imageIndex,
       );
       const prompt = generateIdentityPrompt(
