@@ -1,6 +1,7 @@
 import { fal } from "@fal-ai/client";
 
 import AppConstants from "@/constants/app_constants";
+import { isFluxModelPath } from "@/utils/model_utils";
 import { getPoseReference } from "@/utils/pose_references";
 import { getRoleNegativePrompt } from "@/utils/role_blueprints";
 
@@ -42,7 +43,7 @@ export const handleGenerateImage = async (
   styleName?: string,
 ) => {
   try {
-    const isFluxModel = path.includes("/flux/");
+    const isFluxModel = isFluxModelPath(path);
     const poseReference = isFluxModel ? getPoseReference(styleName) : undefined;
     const endpoint = poseReference
       ? "fal-ai/flux-general"
