@@ -16,4 +16,5 @@ export interface IGeneration {
   request_id: string | null;
   status: EGenerationStatus;
   error: any;
+  seed: number | null;
 }

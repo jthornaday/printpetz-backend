@@ -20,6 +20,17 @@ import { generateIdentityPrompt } from "@/utils/fal_utils";
 import { getModelTriggerWord } from "@/utils/model_utils";
 import { generateImageSchema } from "@/utils/validation/generation_validation_schema";
 
+// fal accepts a 32-bit unsigned seed.
+const SEED_RANGE = 4294967296;
+
+// A batch shares one base seed so a caller can reproduce the whole batch from a
+// single number, but each image is offset so the images differ from each other.
+// With no caller seed, each image draws independently.
+const getImageSeed = (baseSeed: number | undefined, imageIndex: number) =>
+  baseSeed === undefined
+    ? Math.floor(Math.random() * SEED_RANGE)
+    : (baseSeed + imageIndex) % SEED_RANGE;
+
 const getGenerationSubject = (
   basePrompt: string,
   styleName: string,
@@ -43,9 +54,8 @@ const getGenerationSubject = (
 
 const createImage = AsyncHandler.handle(async (req, res) => {
   const user = req.user;
-  const { numberOfImages, styleId, modelId, cutenessLevel } = generateImageSchema.parse(
-    req.body,
-  );
+  const { numberOfImages, styleId, modelId, cutenessLevel, seed } =
+    generateImageSchema.parse(req.body);
 
   const generationCharge = AppConstants.imageGenerationCredit * numberOfImages;
   const hasEnoughCredit = user.credits >= generationCharge;
@@ -83,9 +93,11 @@ const createImage = AsyncHandler.handle(async (req, res) => {
         petName,
         style.name,
       );
+      const imageSeed = getImageSeed(seed, imageIndex);
       const requestId = await handleGenerateImage(
         prompt,
         model.model_path,
+        imageSeed,
         style.name,
       );
 
@@ -97,6 +109,7 @@ const createImage = AsyncHandler.handle(async (req, res) => {
         style_id: styleId,
         user_id: user.id,
         prompt,
+        seed: imageSeed,
       });
     }),
   );
@@ -141,7 +154,7 @@ const downloadImage = AsyncHandler.handle(async (req, res) => {
 });
 
 const editLook = AsyncHandler.handle(async (req, res) => {
-  const { imageUrl, look } = req.body ?? {};
+  const { imageUrl, look, seed } = req.body ?? {};
   const validLooks: EditorLook[] = ["natural", "mascot", "cartoon"];
 
   if (!imageUrl || typeof imageUrl !== "string") {
@@ -156,7 +169,23 @@ const editLook = AsyncHandler.handle(async (req, res) => {
     });
   }
 
-  const editedImageUrl = await handleEditImageLook(imageUrl, look as EditorLook);
+  if (
+    seed !== undefined &&
+    (!Number.isInteger(seed) || seed < 0 || seed >= SEED_RANGE)
+  ) {
+    throw errorResponse.Api400Error({
+      errorDescription: `Seed must be an integer between 0 and ${SEED_RANGE - 1}`,
+    });
+  }
+
+  // A restyle is not persisted as a generation row, so there is nowhere to
+  // record this seed. It only makes a restyle repeatable for a caller who
+  // supplies one.
+  const editedImageUrl = await handleEditImageLook(
+    imageUrl,
+    look as EditorLook,
+    seed,
+  );
   res.dataCreateSuccess({ data: { imageUrl: editedImageUrl } });
 });
 

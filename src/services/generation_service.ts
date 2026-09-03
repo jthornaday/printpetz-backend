@@ -132,6 +132,7 @@ export const deleteGenerationForUser = async (id: number, userId: string) => {
 const handleImageUploadAndSave = async (
   image: QwenImageOutput["images"][number],
   generation: IGeneration,
+  falSeed?: number,
 ) => {
   const fileName = image.url?.split("/").at(-1);
   const fileType = image.content_type;
@@ -147,10 +148,21 @@ const handleImageUploadAndSave = async (
   const url = await uploadFileToS3(uploadData);
 
   if (url) {
+    // The seed is already recorded at insert time. Only overwrite it if fal
+    // reports a different one, which would mean fal ignored the seed we sent.
+    if (falSeed !== undefined && falSeed !== generation.seed) {
+      addErrorLog({
+        error: JSON.stringify({ sent: generation.seed, used: falSeed }),
+        input: JSON.stringify({ generationId: generation.id }),
+        type: "SEED_MISMATCH",
+      });
+    }
+
     await updateGeneration({
       id: generation.id,
       status: EGenerationStatus.COMPLETED,
       image: url,
+      ...(falSeed !== undefined ? { seed: falSeed } : {}),
     });
   }
 };
@@ -192,7 +204,7 @@ export const handleImageGenerationResponse = async (
       });
     }
 
-    await handleImageUploadAndSave(image, generation);
+    await handleImageUploadAndSave(image, generation, payload?.seed);
     return true;
   }
 

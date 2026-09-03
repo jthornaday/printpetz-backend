@@ -40,6 +40,7 @@ export const handleTrainModel = async (datasetUrl: Blob, name: string) => {
 export const handleGenerateImage = async (
   prompt: string,
   path: string,
+  seed: number,
   styleName?: string,
 ) => {
   try {
@@ -60,6 +61,7 @@ export const handleGenerateImage = async (
     const result = await fal.queue.submit(endpoint, {
       input: {
         prompt: generationPrompt,
+        seed,
         loras: [{ path, scale: isFluxModel ? 0.95 : 1.0 }],
         num_images: 1,
         num_inference_steps: isFluxModel ? 24 : 32,
@@ -109,7 +111,11 @@ const getEditorLookPrompt = (look: Exclude<EditorLook, "natural">) => {
   return `${identityLock} Apply only a restrained professional mascot surface treatment: cleaner merchandise-ready rendering and modest stylization, while keeping the face structure, markings, ears, muzzle, eyes, paws, pose, clothing, and scene unchanged. Do not enlarge the head or eyes. The pet must remain immediately recognizable as the exact same individual.`;
 };
 
-export const handleEditImageLook = async (imageUrl: string, look: EditorLook) => {
+export const handleEditImageLook = async (
+  imageUrl: string,
+  look: EditorLook,
+  seed?: number,
+) => {
   // Natural is the original generation. Returning it directly guarantees that
   // choosing Natural can never mutate the pet into a lookalike.
   if (look === "natural") return imageUrl;
@@ -123,6 +129,7 @@ export const handleEditImageLook = async (imageUrl: string, look: EditorLook) =>
         num_images: 1,
         output_format: "jpeg" as const,
         enhance_prompt: false,
+        ...(seed !== undefined ? { seed } : {}),
       },
     });
 

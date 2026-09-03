@@ -30,6 +30,9 @@ interface IFalImageGenerationResponsePayload {
     height?: number;
     content_type?: string;
   }[];
+  // The seed fal actually used. Compared against the seed recorded at insert
+  // time; a mismatch means fal ignored the one we sent.
+  seed?: number;
 }
 
 export type TFalModelTrainingResponse =
