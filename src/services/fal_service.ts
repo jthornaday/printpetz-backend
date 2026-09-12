@@ -3,7 +3,7 @@ import { fal } from "@fal-ai/client";
 import AppConstants from "@/constants/app_constants";
 import { warnIfPromptOverBudget } from "@/utils/fal_utils";
 import { isFluxModelPath } from "@/utils/model_utils";
-import { getPoseReference } from "@/utils/pose_references";
+import { getPoseReference, PoseReference } from "@/utils/pose_references";
 import { getRoleNegativePrompt } from "@/utils/role_blueprints";
 
 import { addErrorLog } from "./error_logs_service";
@@ -38,6 +38,53 @@ export const handleTrainModel = async (datasetUrl: Blob, name: string) => {
   }
 };
 
+// A/B knobs for the reference-guidance experiment. Read at call time rather
+// than at module load so changing an EB environment property takes effect on
+// restart without a code deploy.
+//
+// PRINTPETZ_REF_STRENGTH  defaults to the per-style value in pose_references.ts
+//                         (0.72 for baseball). Setting it to 0 drops reference
+//                         guidance entirely — see resolveReferenceConfig.
+// PRINTPETZ_REF_START     defaults to 0
+// PRINTPETZ_REF_END       defaults to 0.85
+const readFloatEnv = (key: string, fallback: number) => {
+  const raw = process.env[key];
+  if (raw === undefined || raw.trim() === "") return fallback;
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[reference-config] ${key}="${raw}" is not a number. Falling back to ${fallback}.`,
+    );
+    return fallback;
+  }
+
+  return parsed;
+};
+
+// Returns undefined when reference guidance should be switched off entirely,
+// which also drops the request back to the flux-lora endpoint. That is the
+// "reference off" arm: strength 0 on flux-general would still route through
+// the reference code path and rely on fal treating 0 as a no-op.
+const resolveReferenceConfig = (poseReference: PoseReference | undefined) => {
+  if (!poseReference) return undefined;
+
+  const strength = readFloatEnv(
+    "PRINTPETZ_REF_STRENGTH",
+    poseReference.strength,
+  );
+  if (strength <= 0) return undefined;
+
+  return {
+    url: poseReference.url,
+    guidance: poseReference.guidance,
+    strength,
+    start: readFloatEnv("PRINTPETZ_REF_START", 0),
+    end: readFloatEnv("PRINTPETZ_REF_END", 0.85),
+  };
+};
+
 export const handleGenerateImage = async (
   prompt: string,
   path: string,
@@ -47,7 +94,8 @@ export const handleGenerateImage = async (
   try {
     const isFluxModel = isFluxModelPath(path);
     const poseReference = isFluxModel ? getPoseReference(styleName) : undefined;
-    const endpoint = poseReference
+    const reference = resolveReferenceConfig(poseReference);
+    const endpoint = reference
       ? "fal-ai/flux-general"
       : isFluxModel
         ? "fal-ai/flux-lora"
@@ -55,14 +103,40 @@ export const handleGenerateImage = async (
     const roleNegativePrompt = getRoleNegativePrompt(styleName);
     const baseNegativePrompt =
       "blurry, low resolution, low quality, watermark, logo, unintended text, cropped face, out of frame, distorted face, deformed anatomy, duplicate animal, multiple pets, extra limbs, extra ears, extra eyes, giant eyes, oversized cartoon eyes, extreme chibi, toy-like anatomy, photorealistic candid snapshot, spectators, crowd, unrelated people, couch, blanket, furniture, source photo background, floating object, unsupported prop, intersecting prop, duplicated prop, broken prop, missing uniform";
-    const generationPrompt = poseReference
-      ? `${prompt} ${poseReference.guidance}`
+    const generationPrompt = reference
+      ? `${prompt} ${reference.guidance}`
       : prompt;
 
     // generateIdentityPrompt already checks its own output, but the pose
     // guidance is appended here — so the string that actually goes to fal is
     // only measurable at this point.
-    warnIfPromptOverBudget(generationPrompt, { styleName });
+    const estimatedPromptTokens = warnIfPromptOverBudget(generationPrompt, {
+      styleName,
+    });
+
+    // One line per generation, carrying everything an A/B arm needs to be
+    // reconstructed: which endpoint ran, whether a reference was used at all
+    // and which one, the reference values in force, the seed, and the prompt
+    // size. `referenceUsed: false` means this generation had no reference
+    // image — either the style has no pool, the pool env var is unset, or
+    // PRINTPETZ_REF_STRENGTH switched it off.
+    // eslint-disable-next-line no-console
+    console.log(
+      "[generation-config]",
+      JSON.stringify({
+        endpoint,
+        styleName: styleName ?? null,
+        seed,
+        estimatedPromptTokens,
+        loraScale: isFluxModel ? 0.95 : 1.0,
+        referenceUsed: Boolean(reference),
+        referencePoolConfigured: Boolean(poseReference),
+        referenceImageUrl: reference?.url ?? null,
+        referenceStrength: reference?.strength ?? null,
+        referenceStart: reference?.start ?? null,
+        referenceEnd: reference?.end ?? null,
+      }),
+    );
 
     const result = await fal.queue.submit(endpoint, {
       input: {
@@ -72,13 +146,13 @@ export const handleGenerateImage = async (
         num_images: 1,
         num_inference_steps: isFluxModel ? 24 : 32,
         guidance_scale: isFluxModel ? 4.0 : 2.5,
-        ...(isFluxModel && !poseReference ? { acceleration: "regular" as const } : {}),
-        ...(poseReference
+        ...(isFluxModel && !reference ? { acceleration: "regular" as const } : {}),
+        ...(reference
           ? {
-              reference_image_url: poseReference.url,
-              reference_strength: poseReference.strength,
-              reference_start: 0,
-              reference_end: 0.85,
+              reference_image_url: reference.url,
+              reference_strength: reference.strength,
+              reference_start: reference.start,
+              reference_end: reference.end,
             }
           : {}),
         output_format: "jpeg",
