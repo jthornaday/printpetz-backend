@@ -1,6 +1,7 @@
 import { fal } from "@fal-ai/client";
 
 import AppConstants from "@/constants/app_constants";
+import { warnIfPromptOverBudget } from "@/utils/fal_utils";
 import { isFluxModelPath } from "@/utils/model_utils";
 import { getPoseReference } from "@/utils/pose_references";
 import { getRoleNegativePrompt } from "@/utils/role_blueprints";
@@ -57,6 +58,11 @@ export const handleGenerateImage = async (
     const generationPrompt = poseReference
       ? `${prompt} ${poseReference.guidance}`
       : prompt;
+
+    // generateIdentityPrompt already checks its own output, but the pose
+    // guidance is appended here — so the string that actually goes to fal is
+    // only measurable at this point.
+    warnIfPromptOverBudget(generationPrompt, { styleName });
 
     const result = await fal.queue.submit(endpoint, {
       input: {
