@@ -188,8 +188,43 @@ const getBrandingPrompt = (hasPetName: boolean) =>
     ? "BRANDING: the pet name is the only text. No logos, team names, sponsors, numbers or invented lettering."
     : "BRANDING: no text anywhere. No logos, team names, sponsors, numbers or invented lettering.";
 
-const IDENTITY_PROMPT =
-  "IDENTITY: one pet only, the trained pet. Keep its exact coat color and pattern, markings, breed, build, muzzle length and projection, ears, nose and eye color. Never lighten or recolor the coat.";
+// Capped hard: this text sits inside the identity block, which must survive
+// well inside the 480-token guard. A description longer than this is almost
+// always someone pasting a paragraph, and the extra words dilute rather than
+// sharpen the identity.
+const PET_DESCRIPTION_MAX_WORDS = 25;
+
+// The LoRA is the only thing telling the model what the pet looks like, and for
+// a dark coat that is demonstrably not enough — "keep its exact coat color"
+// says nothing about *which* colour. This states it in words.
+const getPetDescriptionClause = (petDescription?: string) => {
+  const cleaned = petDescription?.trim().replace(/\s+/g, " ");
+  if (!cleaned) return "";
+
+  const words = cleaned.split(" ");
+  if (words.length <= PET_DESCRIPTION_MAX_WORDS) {
+    return cleaned.replace(/[.\s]+$/, "");
+  }
+
+  // eslint-disable-next-line no-console
+  console.warn(
+    `[pet-description] Description is ${words.length} words, over the ${PET_DESCRIPTION_MAX_WORDS}-word cap. Truncating.`,
+  );
+
+  return words
+    .slice(0, PET_DESCRIPTION_MAX_WORDS)
+    .join(" ")
+    .replace(/[,;:.\s]+$/, "");
+};
+
+const getIdentityPrompt = (petDescription?: string) => {
+  const description = getPetDescriptionClause(petDescription);
+  const subject = description
+    ? `one pet only, the trained pet — ${description}`
+    : "one pet only, the trained pet";
+
+  return `IDENTITY: ${subject}. Keep its exact coat color and pattern, markings, breed, build, muzzle length and projection, ears, nose and eye color. Never lighten or recolor the coat.`;
+};
 
 const POSE_PROMPT =
   "POSE: upright on hind legs as the participant, shoulders and arms readable in role wardrobe. Forepaws stay animal paws, never human hands. Props gripped or supported, never floating or doubled.";
@@ -202,13 +237,14 @@ export const generateIdentityPrompt = (
   lookLevel = 1,
   petName?: string,
   styleName?: string,
+  petDescription?: string,
 ) => {
   const roleBlueprint = getRoleBlueprintPrompt(styleName);
   const namePrompt = getPetNamePrompt(petName, styleName);
 
   const prompt = [
     subject.trim().replace(/\.?$/, "."),
-    IDENTITY_PROMPT,
+    getIdentityPrompt(petDescription),
     namePrompt.trim(),
     getLookPrompt(lookLevel),
     POSE_PROMPT,

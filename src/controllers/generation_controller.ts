@@ -108,6 +108,7 @@ const createImage = AsyncHandler.handle(async (req, res) => {
   }
 
   const petName = model.pet_name?.trim() || model.name;
+  const petDescription = model.pet_description?.trim() || undefined;
   const triggerWord = getModelTriggerWord(model.model_path, model.name);
   const baseSeed = getBaseSeed(seed);
   const group_id = Date.now();
@@ -124,6 +125,7 @@ const createImage = AsyncHandler.handle(async (req, res) => {
         cutenessLevel,
         petName,
         style.name,
+        petDescription,
       );
       const imageSeed = getImageSeed(baseSeed, imageIndex);
       const requestId = await handleGenerateImage(
