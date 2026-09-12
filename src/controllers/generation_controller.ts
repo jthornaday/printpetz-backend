@@ -31,6 +31,37 @@ const getImageSeed = (baseSeed: number | undefined, imageIndex: number) =>
     ? Math.floor(Math.random() * SEED_RANGE)
     : (baseSeed + imageIndex) % SEED_RANGE;
 
+// PRINTPETZ_FIXED_SEED pins the base seed for every generation, so A/B arms run
+// on identical seeds without the caller having to pass one. Images within a
+// batch are still offset by index, so a batch of 4 is S, S+1, S+2, S+3 — four
+// different images, but the same four in every arm.
+//
+// The env var deliberately wins over a caller-supplied seed: it is an operator
+// override for experiments, and an arm that silently used a different seed
+// because the client sent one would be worthless.
+const getBaseSeed = (requestSeed: number | undefined) => {
+  const raw = process.env.PRINTPETZ_FIXED_SEED;
+  if (raw === undefined || raw.trim() === "") return requestSeed;
+
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed >= SEED_RANGE) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[generation-config] PRINTPETZ_FIXED_SEED="${raw}" is not an integer in 0..${SEED_RANGE - 1}. Ignoring it.`,
+    );
+    return requestSeed;
+  }
+
+  if (requestSeed !== undefined && requestSeed !== parsed) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[generation-config] PRINTPETZ_FIXED_SEED=${parsed} is overriding the caller-supplied seed ${requestSeed}.`,
+    );
+  }
+
+  return parsed;
+};
+
 const getGenerationSubject = (
   basePrompt: string,
   styleName: string,
@@ -78,6 +109,7 @@ const createImage = AsyncHandler.handle(async (req, res) => {
 
   const petName = model.pet_name?.trim() || model.name;
   const triggerWord = getModelTriggerWord(model.model_path, model.name);
+  const baseSeed = getBaseSeed(seed);
   const group_id = Date.now();
   const generations = await Promise.all(
     Array.from({ length: numberOfImages }).map(async (_, imageIndex) => {
@@ -93,7 +125,7 @@ const createImage = AsyncHandler.handle(async (req, res) => {
         petName,
         style.name,
       );
-      const imageSeed = getImageSeed(seed, imageIndex);
+      const imageSeed = getImageSeed(baseSeed, imageIndex);
       const requestId = await handleGenerateImage(
         prompt,
         model.model_path,
