@@ -270,7 +270,7 @@ const getPetNamePrompt = (petName?: string, styleName?: string) => {
 // line is the only place the rule can land at all.
 const getBrandingPrompt = (hasPetName: boolean) =>
   hasPetName
-    ? "MARKINGS: the pet name is the only text in the image. Every other fabric surface stays plain and unmarked."
+    ? "MARKINGS: the pet name is the only text in the image, and may appear on more than one garment. Every other fabric surface stays plain and unmarked."
     : "MARKINGS: every fabric surface stays plain and unmarked.";
 
 // Capped hard: this text sits inside the identity block, which must survive
@@ -312,7 +312,7 @@ const getIdentityPrompt = (petDescription?: string) => {
 };
 
 const POSE_PROMPT =
-  "POSE: upright on hind legs as the participant, shoulders and arms readable in role wardrobe. Forepaws stay animal paws, never human hands. Props gripped or supported, never floating or doubled.";
+  "POSE: upright on hind legs as the participant, shoulders and arms readable in role wardrobe. Furred animal forepaws with visible paw pads, wrapped around the grip. Props gripped or supported, never floating or doubled.";
 
 // Order is deliberate and load-bearing: FLUX truncates from the end, so the
 // sections appear in descending order of how much they matter. Theme first

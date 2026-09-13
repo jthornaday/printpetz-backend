@@ -87,10 +87,22 @@ const getVariantOffset = (groupId: number) =>
 
 // Garments are described affirmatively rather than by exclusion. flux-lora
 // drops negative_prompt entirely, and FLUX renders whatever nouns appear in the
-// prompt regardless of negation — "no team logo" puts "team logo" in front of
-// the model. So the cap is "plain solid-colour with a blank front panel", and
-// the trousers are stated as present and covering the legs rather than the fur
-// being talked out of existence.
+// prompt regardless of negation, so the wardrobe is stated as present.
+//
+// Three things here come straight off the 13 Sept batches rather than theory:
+//
+// Cap logos. "Plain front panel" left the panel empty and the model filled it —
+// Max produced a Yankees NY on three of four caps. In every image across both
+// batches where the pet's NAME was on the cap panel, no logo appeared. An empty
+// slot gets filled; the fix is to fill it deliberately, not to ask for blank.
+//
+// Chaps. "Covering both legs to the ankle" rendered as a front panel with the
+// hindquarters and rear legs bare behind it, three of four. The seat and hips
+// have to be named or they do not get covered.
+//
+// Bobble-heads. "Cute" opens every prompt and on FLUX it pulls toward
+// big-head/big-eye mascot proportions even in Natural. Dropped here only; the
+// same word opens all 70 DB base_prompts and those are a separate change.
 const getGenerationSubject = (
   basePrompt: string,
   styleName: string,
@@ -98,17 +110,20 @@ const getGenerationSubject = (
   imageIndex: number,
   variants: unknown,
   variantOffset: number,
+  petName: string,
 ) => {
   const normalizedStyle = styleName.trim().toLowerCase();
 
   if (normalizedStyle.includes("baseball")) {
     const isBatting = imageIndex % 2 === 0;
 
+    const capName = petName.toUpperCase();
+
     if (isBatting) {
-      return `Cute ${triggerWord} as an upright anthropomorphic baseball batter on hind legs in a clean conventional batter stance, wearing a plain white baseball jersey, white fabric baseball trousers covering both legs to the ankle, a belt at the waist, and a plain solid-colour baseball cap with a blank front panel. Fur shows only on the head, forepaws and tail. Both animal forepaws grip exactly one wooden baseball bat, with no fielding glove anywhere in the image. Epic ballpark background, dramatic lighting, ultra detailed 8K`;
+      return `${triggerWord} as an upright anthropomorphic baseball batter on hind legs in a clean conventional batter stance, wearing a plain white baseball jersey, white fabric baseball trousers fully covering the seat, hips and both hind legs down to the ankle, a belt at the waist, and a plain baseball cap whose front panel reads "${capName}" in block letters. Fur shows only on the head, forepaws and tail. A leather fielding glove is worn over one forepaw; the other forepaw grips the bat handle. Epic ballpark background, dramatic lighting, ultra detailed 8K`;
     }
 
-    return `Cute ${triggerWord} as an upright anthropomorphic baseball fielder on hind legs in a clean athletic fielding stance, wearing a plain white baseball jersey, white fabric baseball trousers covering both legs to the ankle, a belt at the waist, and a plain solid-colour baseball cap with a blank front panel. Fur shows only on the head, forepaws and tail. Exactly one leather baseball glove is fitted over one animal forepaw, with no baseball bat anywhere in the image. Epic ballpark background, dramatic lighting, ultra detailed 8K`;
+    return `${triggerWord} as an upright anthropomorphic baseball fielder on hind legs in a clean athletic fielding stance, wearing a plain white baseball jersey, white fabric baseball trousers fully covering the seat, hips and both hind legs down to the ankle, a belt at the waist, and a plain baseball cap whose front panel reads "${capName}" in block letters. Fur shows only on the head, forepaws and tail. A leather fielding glove is worn over one forepaw, the other forepaw resting on the glove. Epic ballpark background, dramatic lighting, ultra detailed 8K`;
   }
 
   const subject = basePrompt.replaceAll("[TRIGGER_WORD]", triggerWord);
@@ -165,6 +180,7 @@ const createImage = AsyncHandler.handle(async (req, res) => {
         imageIndex,
         style.variants,
         variantOffset,
+        petName,
       );
       const prompt = generateIdentityPrompt(
         subject,
