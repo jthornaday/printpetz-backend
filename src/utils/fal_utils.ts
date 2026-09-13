@@ -183,10 +183,15 @@ const getPetNamePrompt = (petName?: string, styleName?: string) => {
   return ` NAME: the ${match.garment} reads "${upperName}" once, spelled exactly, ${match.placement}.`;
 };
 
+// Stated as what the fabric IS, not as a list of things to avoid. The old
+// wording named logos, team names and sponsors explicitly, and on a model that
+// renders nouns regardless of negation that reads closer to a shopping list
+// than a prohibition. flux-lora also drops negative_prompt entirely, so this
+// line is the only place the rule can land at all.
 const getBrandingPrompt = (hasPetName: boolean) =>
   hasPetName
-    ? "BRANDING: the pet name is the only text. No logos, team names, sponsors, numbers or invented lettering."
-    : "BRANDING: no text anywhere. No logos, team names, sponsors, numbers or invented lettering.";
+    ? "MARKINGS: the pet name is the only text in the image. Every other fabric surface stays plain and unmarked."
+    : "MARKINGS: every fabric surface stays plain and unmarked.";
 
 // Capped hard: this text sits inside the identity block, which must survive
 // well inside the 480-token guard. A description longer than this is almost
