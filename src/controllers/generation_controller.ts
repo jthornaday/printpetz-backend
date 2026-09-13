@@ -18,6 +18,7 @@ import { EGenerationStatus } from "@/types/generation";
 import errorResponse from "@/utils/errors/errorResponse";
 import { generateIdentityPrompt } from "@/utils/fal_utils";
 import { getModelTriggerWord } from "@/utils/model_utils";
+import { getVariantForImage } from "@/utils/prompt_variants";
 import { generateImageSchema } from "@/utils/validation/generation_validation_schema";
 
 // fal accepts a 32-bit unsigned seed.
@@ -39,9 +40,12 @@ const getImageSeed = (baseSeed: number | undefined, imageIndex: number) =>
 // The env var deliberately wins over a caller-supplied seed: it is an operator
 // override for experiments, and an arm that silently used a different seed
 // because the client sent one would be worthless.
-const getBaseSeed = (requestSeed: number | undefined) => {
+// Parsed in one place so the seed and the variant rotation agree about whether
+// this run is pinned. A half-pinned run — fixed seed, rotating variants — would
+// look reproducible and quietly not be.
+const readFixedSeed = () => {
   const raw = process.env.PRINTPETZ_FIXED_SEED;
-  if (raw === undefined || raw.trim() === "") return requestSeed;
+  if (raw === undefined || raw.trim() === "") return undefined;
 
   const parsed = Number(raw);
   if (!Number.isInteger(parsed) || parsed < 0 || parsed >= SEED_RANGE) {
@@ -49,18 +53,37 @@ const getBaseSeed = (requestSeed: number | undefined) => {
     console.warn(
       `[generation-config] PRINTPETZ_FIXED_SEED="${raw}" is not an integer in 0..${SEED_RANGE - 1}. Ignoring it.`,
     );
-    return requestSeed;
-  }
-
-  if (requestSeed !== undefined && requestSeed !== parsed) {
-    // eslint-disable-next-line no-console
-    console.warn(
-      `[generation-config] PRINTPETZ_FIXED_SEED=${parsed} is overriding the caller-supplied seed ${requestSeed}.`,
-    );
+    return undefined;
   }
 
   return parsed;
 };
+
+const getBaseSeed = (requestSeed: number | undefined) => {
+  const fixedSeed = readFixedSeed();
+  if (fixedSeed === undefined) return requestSeed;
+
+  if (requestSeed !== undefined && requestSeed !== fixedSeed) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[generation-config] PRINTPETZ_FIXED_SEED=${fixedSeed} is overriding the caller-supplied seed ${requestSeed}.`,
+    );
+  }
+
+  return fixedSeed;
+};
+
+// Which variant image 0 of a batch starts on. Rotating on group_id means a
+// customer who generates the same theme twice gets different framings the
+// second time, instead of the same first-four every batch — with only four
+// images per batch and five variants, a fixed start would leave the fifth
+// permanently unused.
+//
+// A pinned seed switches the rotation off: an A/B arm has to be reproducible,
+// and an offset keyed to wall-clock time would make every run a different
+// experiment.
+const getVariantOffset = (groupId: number) =>
+  readFixedSeed() === undefined ? groupId : 0;
 
 // Garments are described affirmatively rather than by exclusion. flux-lora
 // drops negative_prompt entirely, and FLUX renders whatever nouns appear in the
@@ -73,6 +96,8 @@ const getGenerationSubject = (
   styleName: string,
   triggerWord: string,
   imageIndex: number,
+  variants: unknown,
+  variantOffset: number,
 ) => {
   const normalizedStyle = styleName.trim().toLowerCase();
 
@@ -86,7 +111,19 @@ const getGenerationSubject = (
     return `Cute ${triggerWord} as an upright anthropomorphic baseball fielder on hind legs in a clean athletic fielding stance, wearing a plain white baseball jersey, white fabric baseball trousers covering both legs to the ankle, a belt at the waist, and a plain solid-colour baseball cap with a blank front panel. Fur shows only on the head, forepaws and tail. Exactly one leather baseball glove is fitted over one animal forepaw, with no baseball bat anywhere in the image. Epic ballpark background, dramatic lighting, ultra detailed 8K`;
   }
 
-  return basePrompt.replaceAll("[TRIGGER_WORD]", triggerWord);
+  const subject = basePrompt.replaceAll("[TRIGGER_WORD]", triggerWord);
+  const variant = getVariantForImage(
+    variants,
+    variantOffset + imageIndex,
+    styleName,
+  );
+  if (!variant) return subject;
+
+  // The variant lands as its own sentence after the theme block, so the
+  // background and quality tail stay where the theme put them. Capitalised
+  // because the base prompt ends in a full stop.
+  const subjectWithStop = subject.trim().replace(/\.?$/, ".");
+  return `${subjectWithStop} ${variant[0].toUpperCase()}${variant.slice(1)}`;
 };
 
 const createImage = AsyncHandler.handle(async (req, res) => {
@@ -118,6 +155,7 @@ const createImage = AsyncHandler.handle(async (req, res) => {
   const triggerWord = getModelTriggerWord(model.model_path, model.name);
   const baseSeed = getBaseSeed(seed);
   const group_id = Date.now();
+  const variantOffset = getVariantOffset(group_id);
   const generations = await Promise.all(
     Array.from({ length: numberOfImages }).map(async (_, imageIndex) => {
       const subject = getGenerationSubject(
@@ -125,6 +163,8 @@ const createImage = AsyncHandler.handle(async (req, res) => {
         style.name,
         triggerWord,
         imageIndex,
+        style.variants,
+        variantOffset,
       );
       const prompt = generateIdentityPrompt(
         subject,

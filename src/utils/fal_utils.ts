@@ -149,6 +149,64 @@ const getPetDisplayName = (modelName?: string) => {
 // the badge it was meant to prevent. Keeping every placement purely positional
 // leaves the MARKINGS line as the single place the plain-fabric rule is stated.
 const NAME_PLACEMENTS: Array<{ aliases: string[]; garment: string; placement: string }> = [
+// The expansion themes come FIRST, deliberately. Matching is substring-based
+// (`styleName.includes(alias)`) and returns the first hit, so a more specific
+// alias has to sit above a more general one or it can never win. Three real
+// collisions depend on this order:
+//   "Viking Chieftain"      contains "king"
+//   "Harvest Chef"          contains "chef"
+//   "Medieval Queen"        contains "queen"
+// Each of those has its own entry here; without this ordering they would
+// silently inherit the royal sash or the chef coat instead.
+  { aliases: ["rowing", "rower"], garment: "rowing singlet", placement: "in clean block letters across the chest" }, // Rowing
+  { aliases: ["archery", "archer"], garment: "quiver strap", placement: "in clean block letters across the chest" }, // Archery
+  { aliases: ["curling", "curler"], garment: "curling jacket", placement: "in clean block letters across the back" }, // Curling
+  { aliases: ["darts"], garment: "darts shirt", placement: "in clean block letters across the back" }, // Darts
+  { aliases: ["billiards", "snooker"], garment: "waistcoat", placement: "embroidered on the chest" }, // Billiards
+  { aliases: ["bowling"], garment: "bowling shirt", placement: "in clean block letters across the back" }, // Bowling
+  { aliases: ["sailboat", "sailing", "sailor"], garment: "sailing jacket", placement: "in clean block letters across the chest" }, // Sailboat Racer
+  { aliases: ["race car", "racing driver"], garment: "racing suit chest panel", placement: "in clean block letters" }, // Race Car Driver
+  { aliases: ["motocross"], garment: "motocross jersey", placement: "in clean block letters across the back" }, // Motocross Racer
+  { aliases: ["softball"], garment: "jersey", placement: "across the upper back or on a chest nameplate" }, // Softball
+  { aliases: ["swimmer", "swimming"], garment: "swim cap", placement: "in clean block letters" }, // Swimmer
+  { aliases: ["rugby"], garment: "jersey", placement: "across the upper back or on a chest nameplate" }, // Rugby
+  { aliases: ["lacrosse"], garment: "jersey", placement: "across the upper back or on a chest nameplate" }, // Lacrosse
+  { aliases: ["field hockey"], garment: "jersey", placement: "across the upper back or on a chest nameplate" }, // Field Hockey
+  { aliases: ["track and field", "athletics"], garment: "running singlet", placement: "in clean block letters across the chest" }, // Track and Field
+  { aliases: ["tennis"], garment: "tennis shirt", placement: "in clean block letters across the back" }, // Tennis
+  { aliases: ["aussie rules"], garment: "jersey", placement: "across the upper back or on a chest nameplate" }, // Aussie Rules Football
+  { aliases: ["santa"], garment: "belt buckle", placement: "in clean block letters" }, // Santa Claus
+  { aliases: ["mrs. claus", "mrs claus"], garment: "apron bib", placement: "in clean block letters across the chest" }, // Mrs. Claus
+  { aliases: ["elf"], garment: "tunic", placement: "in clean block letters across the chest" }, // Elf
+  { aliases: ["gingerbread"], garment: "icing panel", placement: "piped in clean block letters across the chest" }, // Gingerbread Man
+  { aliases: ["snowman"], garment: "knit scarf", placement: "in clean block letters along the length" }, // Snowman
+  { aliases: ["angel"], garment: "gold sash", placement: "in clean embroidered letters" }, // Christmas Angel
+  { aliases: ["fairy"], garment: "ribbon sash", placement: "in clean block letters" }, // Christmas Fairy
+  { aliases: ["wise man"], garment: "gold sash", placement: "in clean embroidered letters" }, // Wise Man
+  { aliases: ["nativity"], garment: "cloth sash", placement: "in clean block letters" }, // Nativity Visitor
+  { aliases: ["cosy christmas", "cozy christmas"], garment: "knit sweater", placement: "in clean block letters across the chest" }, // Cosy Christmas
+  { aliases: ["reindeer"], garment: "collar tag", placement: "in clean block letters" }, // Reindeer Helper
+  { aliases: ["pilgrim"], garment: "cloth sash", placement: "in clean block letters" }, // Pilgrim
+  { aliases: ["harvest chef"], garment: "apron bib", placement: "in clean block letters across the chest" }, // Harvest Chef
+  { aliases: ["autumn portrait"], garment: "knit scarf", placement: "in clean block letters along the length" }, // Autumn Portrait
+  { aliases: ["uncle sam"], garment: "hat band", placement: "in clean block letters around the crown" }, // Uncle Sam
+  { aliases: ["stars and stripes", "stars-and-stripes"], garment: "chest sash", placement: "in clean block letters" }, // Stars and Stripes
+  { aliases: ["backyard barbecue", "barbecue"], garment: "apron bib", placement: "in clean block letters across the chest" }, // Backyard Barbecue
+  { aliases: ["founding father"], garment: "cloth sash", placement: "in clean embroidered letters" }, // Founding Father
+  { aliases: ["roman emperor", "emperor"], garment: "crimson sash", placement: "in clean embroidered letters" }, // Roman Emperor
+  { aliases: ["pharaoh"], garment: "gold collar plate", placement: "in clean engraved letters" }, // Egyptian Pharaoh
+  { aliases: ["napoleonic"], garment: "white sash", placement: "in clean embroidered letters" }, // Napoleonic General
+  { aliases: ["medieval queen"], garment: "chest sash", placement: "in clean embroidered letters" }, // Medieval Queen
+  { aliases: ["viking"], garment: "cloth sash", placement: "in clean embroidered letters" }, // Viking Chieftain
+  { aliases: ["samurai"], garment: "chest plate", placement: "in clean engraved letters" }, // Samurai
+  { aliases: ["jazz age", "jazz-age", "1920s"], garment: "hat band", placement: "in clean block letters around the crown" }, // Jazz Age Dapper
+  { aliases: ["caped hero"], garment: "chest panel", placement: "in clean block letters" }, // Caped Hero
+  { aliases: ["armoured tech", "armored tech"], garment: "chest plate", placement: "in clean block letters" }, // Armoured Tech Hero
+  { aliases: ["masked vigilante", "vigilante"], garment: "chest panel", placement: "in clean block letters" }, // Masked Vigilante
+  { aliases: ["flying hero"], garment: "chest panel", placement: "in clean block letters" }, // Flying Hero
+  { aliases: ["super strength", "super-strength"], garment: "belt buckle", placement: "in clean block letters" }, // Super Strength Hero
+
+  // --- themes that predate the expansion ---
   {
     aliases: ["baseball", "football", "basketball", "soccer", "hockey", "cricket"],
     garment: "jersey",
