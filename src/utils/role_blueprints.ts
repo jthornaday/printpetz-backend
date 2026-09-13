@@ -57,6 +57,16 @@ const roleBlueprints: RoleBlueprint[] = [
     negative:
       "floating soccer ball, duplicate soccer ball, ball through leg, ball fused with foot, extra leg, impossible kicking pose, human hands on soccer player",
   },
+  // Must sit above the ice-hockey entry: "field hockey" contains "hockey", and
+  // the ice blueprint would otherwise put a puck on a grass pitch.
+  {
+    aliases: ["field hockey"],
+    sports: true,
+    prompt:
+      "Exactly one field hockey stick, both paws on the handle. At most one ball, on the turf.",
+    negative:
+      "floating hockey stick, duplicate hockey stick, broken stick, stick through body, missing paw on stick, floating ball, duplicate ball, human hand on hockey stick, human fingers on hockey stick",
+  },
   {
     aliases: ["hockey"],
     sports: true,
