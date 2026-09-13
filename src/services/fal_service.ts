@@ -47,6 +47,8 @@ export const handleTrainModel = async (datasetUrl: Blob, name: string) => {
 //                         guidance entirely — see resolveReferenceConfig.
 // PRINTPETZ_REF_START     defaults to 0
 // PRINTPETZ_REF_END       defaults to 0.85
+// PRINTPETZ_LORA_SCALE    defaults to 0.95 on FLUX, 1.0 on qwen — see
+//                         resolveLoraScale below
 const readFloatEnv = (key: string, fallback: number) => {
   const raw = process.env[key];
   if (raw === undefined || raw.trim() === "") return fallback;
@@ -85,6 +87,44 @@ const resolveReferenceConfig = (poseReference: PoseReference | undefined) => {
   };
 };
 
+// fal documents loras[].scale as "Application strength (0-2)" with a default of
+// 1, and its own best-practice note puts the usual working band at 0.5-1.5. So
+// values above 1.0 are legal, and they are the point of this knob.
+//
+// The reason it exists: themes with a strong human-costume prior — founding
+// father, warrior, archer — render a human instead of the pet, or give it human
+// hands and legs. Themes FLUX has seen on dogs (santa, baseball) come out
+// clean. That pattern is the base model's prior beating the LoRA, which is a
+// weighting problem rather than a wording one, and no amount of prompt editing
+// fixes it.
+const LORA_SCALE_MIN = 0;
+const LORA_SCALE_MAX = 2;
+
+// 0.95 is what every FLUX generation has used to date; qwen models have always
+// used 1.0. Both are preserved as defaults so an unset env var changes nothing.
+const DEFAULT_FLUX_LORA_SCALE = 0.95;
+const DEFAULT_QWEN_LORA_SCALE = 1.0;
+
+// One env var covers both endpoints deliberately: an A/B arm that silently
+// applied to FLUX but not qwen would be reporting on a mixed population.
+const resolveLoraScale = (isFluxModel: boolean) => {
+  const fallback = isFluxModel
+    ? DEFAULT_FLUX_LORA_SCALE
+    : DEFAULT_QWEN_LORA_SCALE;
+  const requested = readFloatEnv("PRINTPETZ_LORA_SCALE", fallback);
+
+  if (requested < LORA_SCALE_MIN || requested > LORA_SCALE_MAX) {
+    const clamped = Math.min(Math.max(requested, LORA_SCALE_MIN), LORA_SCALE_MAX);
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[generation-config] PRINTPETZ_LORA_SCALE=${requested} is outside fal's documented ${LORA_SCALE_MIN}-${LORA_SCALE_MAX} range for loras[].scale. Clamping to ${clamped}.`,
+    );
+    return clamped;
+  }
+
+  return requested;
+};
+
 export const handleGenerateImage = async (
   prompt: string,
   path: string,
@@ -100,6 +140,7 @@ export const handleGenerateImage = async (
       : isFluxModel
         ? "fal-ai/flux-lora"
         : "fal-ai/qwen-image";
+    const loraScale = resolveLoraScale(isFluxModel);
     const roleNegativePrompt = getRoleNegativePrompt(styleName);
     const baseNegativePrompt =
       "blurry, low resolution, low quality, watermark, logo, unintended text, cropped face, out of frame, distorted face, deformed anatomy, duplicate animal, multiple pets, extra limbs, extra ears, extra eyes, giant eyes, oversized cartoon eyes, extreme chibi, toy-like anatomy, photorealistic candid snapshot, spectators, crowd, unrelated people, couch, blanket, furniture, source photo background, floating object, unsupported prop, intersecting prop, duplicated prop, broken prop, missing uniform";
@@ -128,7 +169,7 @@ export const handleGenerateImage = async (
         styleName: styleName ?? null,
         seed,
         estimatedPromptTokens,
-        loraScale: isFluxModel ? 0.95 : 1.0,
+        loraScale,
         referenceUsed: Boolean(reference),
         referencePoolConfigured: Boolean(poseReference),
         referenceImageUrl: reference?.url ?? null,
@@ -142,7 +183,7 @@ export const handleGenerateImage = async (
       input: {
         prompt: generationPrompt,
         seed,
-        loras: [{ path, scale: isFluxModel ? 0.95 : 1.0 }],
+        loras: [{ path, scale: loraScale }],
         num_images: 1,
         num_inference_steps: isFluxModel ? 24 : 32,
         guidance_scale: isFluxModel ? 4.0 : 2.5,
