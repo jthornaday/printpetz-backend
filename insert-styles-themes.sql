@@ -1,6 +1,9 @@
 -- PrintPetz — insert the 47 expansion themes
 -- Generated 2026-09-13. NOT run by Claude. Review, then apply in Supabase.
 --
+-- This file contains no DDL. It never creates the variants column or the
+-- styles_variants_shape constraint -- those live only in the migration.
+--
 -- Prerequisites, in order:
 --   1. migrate-styles-category-variants.sql  (adds the variants column)
 --   2. the code on branch feat/theme-expansion deployed
@@ -16,13 +19,20 @@
 
 begin;
 
--- Guard: expect 0. A non-zero count means some of these names already exist
--- and this file would create duplicates.
-select count(*) as should_be_zero
+-- Informational: how many of these names already exist. 0 on a first run. The
+-- insert below skips any name already present, so a non-zero count here is not
+-- a failure -- it just means that many rows will be left alone.
+select count(*) as already_present
 from public.styles
 where name in ('Rowing', 'Archery', 'Curling', 'Darts', 'Billiards', 'Bowling', 'Sailboat Racer', 'Race Car Driver', 'Motocross Racer', 'Softball', 'Swimmer', 'Rugby', 'Lacrosse', 'Field Hockey', 'Track and Field', 'Tennis', 'Aussie Rules Football', 'Santa Claus', 'Mrs. Claus', 'Elf', 'Gingerbread Man', 'Snowman', 'Christmas Angel', 'Christmas Fairy', 'Wise Man', 'Nativity Visitor', 'Cosy Christmas', 'Reindeer Helper', 'Pilgrim', 'Harvest Chef', 'Autumn Portrait', 'Uncle Sam', 'Stars and Stripes', 'Backyard Barbecue', 'Founding Father', 'Roman Emperor', 'Egyptian Pharaoh', 'Napoleonic General', 'Medieval Queen', 'Viking Chieftain', 'Samurai', 'Jazz Age Dapper', 'Caped Hero', 'Armoured Tech Hero', 'Masked Vigilante', 'Flying Hero', 'Super Strength Hero');
 
-insert into public.styles (name, category, image, base_prompt, variants) values
+-- Re-runnable: rows whose name already exists are skipped rather than
+-- duplicated, so a partial failure can be retried by running the file again.
+-- styles.name has no unique constraint, so this is a NOT EXISTS filter rather
+-- than ON CONFLICT.
+insert into public.styles (name, category, image, base_prompt, variants)
+select v.name, v.category, v.image, v.base_prompt, v.variants
+from (values
 -- Rowing (Sports) — 62 words | worst assembled: Natural 314 / Mascot 318 / Cartoon 320
   ('Rowing', 'Sports', '', 'Cute [TRIGGER_WORD] as a rower, upright by the water. Wearing a plain sleeveless rowing singlet, plain fitted shorts to mid-thigh, and plain low deck shoes. Fur shows on the head, forepaws, lower legs and tail. Both forepaws grip exactly one long wooden oar by the handle. A racing shell rests at the bank behind. Calm river background, dramatic lighting, ultra detailed 8K.', '["lifting the oar clear of the water, side profile camera, mist behind","shouldering the oar at the boathouse, three-quarter camera, river glinting","close portrait from the chest up, dawn light, water soft behind","wide full-body framing on the landing stage, racing shell beyond","turning toward the camera mid-stride, low angle, rowing club behind"]'::jsonb),
 -- Archery (Sports) — 70 words | worst assembled: Natural 329 / Mascot 333 / Cartoon 335
@@ -117,7 +127,10 @@ insert into public.styles (name, category, image, base_prompt, variants) values
   ('Flying Hero', 'Heroes', '', 'Cute [TRIGGER_WORD] as a flying hero, upright on an airfield. Wearing a plain brown leather flight jacket with a plain chest panel, a plain long scarf at the neck, plain canvas trousers covering both legs to the ankle, and laced boots. Fur shows only on the head, forepaws and tail. The goggles are pushed up on the forehead, face fully visible. Airfield background, dramatic lighting, ultra detailed 8K.', '["wind streaming past, low heroic camera, propeller blurred behind","close portrait from the chest up, golden hour, sky soft behind","wide full-body framing on the grass, biplane parked beyond","turning toward the camera, three-quarter framing, clouds piling above","mid-stride across the airfield, side profile camera, hangars receding"]'::jsonb),
 -- Super Strength Hero (Heroes) — 61 words | worst assembled: Natural 313 / Mascot 317 / Cartoon 320
   ('Super Strength Hero', 'Heroes', '', 'Cute [TRIGGER_WORD] as a super strength hero, upright in an arena. Wearing a plain sleeveless singlet, a wide plain belt with a plain square buckle, plain fitted shorts to mid-thigh, and plain wrist wraps on both forearms. Fur shows on the head, forepaws, lower legs and tail. Both forepaws grip exactly one thick barbell. Arena background, dramatic lighting, ultra detailed 8K.', '["lifting the barbell overhead, low heroic camera, arena lights flaring","close portrait from the chest up, hard light, arena soft behind","wide full-body framing on the platform, seating rising beyond","turning toward the camera, three-quarter framing, chalk dust drifting","arms raised in celebration, low angle, spotlights burning above"]'::jsonb)
-;
+) as v (name, category, image, base_prompt, variants)
+where not exists (
+  select 1 from public.styles s where s.name = v.name
+);
 
 -- Sanity check: expect 47 rows, every one carrying [TRIGGER_WORD] and 5 variants.
 select id, name, category, length(base_prompt) as chars,
