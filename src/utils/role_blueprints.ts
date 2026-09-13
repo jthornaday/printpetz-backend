@@ -37,7 +37,7 @@ const roleBlueprints: RoleBlueprint[] = [
     aliases: ["football"],
     sports: true,
     prompt:
-      "Exactly one football, cradled against the body rather than finger-gripped.",
+      "Exactly one football, cradled against the body with one forepaw over the top.",
     negative:
       "floating football, duplicate football, football through torso, football replacing paw, detached paw, impossible ball grip, human hand holding football, human fingers on football",
   },
@@ -87,7 +87,7 @@ const roleBlueprints: RoleBlueprint[] = [
   },
   {
     aliases: ["police"],
-    prompt: "Any radio, badge or flashlight is worn or held, not floating.",
+    prompt: "Any radio or flashlight is clipped to the uniform or held in one paw.",
   },
   {
     aliases: ["firefighter", "fire fighter"],
@@ -99,7 +99,10 @@ const roleBlueprints: RoleBlueprint[] = [
   },
   {
     aliases: ["astronaut"],
-    prompt: "The suit encloses the body, with helmet, gloves and hoses attached.",
+    // The helmet is deliberately absent here: the rewritten base_prompt has it
+    // off and held so the pet's face is visible, and a suit that "encloses the
+    // body, with helmet attached" would fight that every generation.
+    prompt: "The suit encloses the body, with gloves and hoses attached.",
   },
 ];
 

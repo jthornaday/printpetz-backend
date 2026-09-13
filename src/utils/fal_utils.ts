@@ -142,7 +142,12 @@ const getPetDisplayName = (modelName?: string) => {
 };
 
 // Where the name sits for each role. One short phrase each: the model needs the
-// location, not an essay about it.
+// location, not an essay about it — and a location is all it may be. The
+// uniformed roles used to carry "with no agency, department or airline
+// insignia", which named three things to avoid plus the word insignia itself.
+// FLUX draws nouns whether or not they are negated, so that phrasing invited
+// the badge it was meant to prevent. Keeping every placement purely positional
+// leaves the MARKINGS line as the single place the plain-fabric rule is stated.
 const NAME_PLACEMENTS: Array<{ aliases: string[]; garment: string; placement: string }> = [
   {
     aliases: ["baseball", "football", "basketball", "soccer", "hockey", "cricket"],
@@ -161,9 +166,26 @@ const NAME_PLACEMENTS: Array<{ aliases: string[]; garment: string; placement: st
   },
   {
     aliases: ["doctor", "physician", "police", "firefighter", "pilot", "astronaut"],
-    garment: "plain name patch",
-    placement: "with no agency, department or airline insignia",
+    garment: "plain fabric name patch",
+    placement: "stitched flat on the chest",
   },
+  // Everything below used to fall through to the generic "the uniform reads X
+  // on a clean name patch" default, which invents a patch on a ballgown and a
+  // uniform on a pirate. Each of these names a surface the role actually has,
+  // so the DB base_prompt and this line describe the same piece of cloth
+  // instead of competing for where the name goes.
+  { aliases: ["skateboard", "skater"], garment: "skate tee", placement: "in clean block letters across the back" },
+  { aliases: ["soldier"], garment: "name tape", placement: "stitched flat above the chest pocket" },
+  { aliases: ["scientist"], garment: "lab coat", placement: "embroidered on the chest" },
+  { aliases: ["artist"], garment: "apron bib", placement: "in clean block letters across the chest" },
+  { aliases: ["superhero"], garment: "plain chest panel on the suit", placement: "in clean block letters" },
+  { aliases: ["king", "queen"], garment: "chest sash", placement: "in clean embroidered letters" },
+  { aliases: ["cowboy"], garment: "hat band", placement: "in clean block letters around the crown" },
+  // "Warrier" is how the theme is spelled in the styles table; both spellings
+  // are matched so fixing the typo later does not silently break the lookup.
+  { aliases: ["warrior", "warrier"], garment: "cloth banner", placement: "hanging on the wall behind" },
+  { aliases: ["pirate"], garment: "waist sash", placement: "in clean block letters" },
+  { aliases: ["rockstar"], garment: "guitar strap", placement: "in clean block letters" },
 ];
 
 const getPetNamePrompt = (petName?: string, styleName?: string) => {
@@ -183,10 +205,15 @@ const getPetNamePrompt = (petName?: string, styleName?: string) => {
   return ` NAME: the ${match.garment} reads "${upperName}" once, spelled exactly, ${match.placement}.`;
 };
 
+// Stated as what the fabric IS, not as a list of things to avoid. The old
+// wording named logos, team names and sponsors explicitly, and on a model that
+// renders nouns regardless of negation that reads closer to a shopping list
+// than a prohibition. flux-lora also drops negative_prompt entirely, so this
+// line is the only place the rule can land at all.
 const getBrandingPrompt = (hasPetName: boolean) =>
   hasPetName
-    ? "BRANDING: the pet name is the only text. No logos, team names, sponsors, numbers or invented lettering."
-    : "BRANDING: no text anywhere. No logos, team names, sponsors, numbers or invented lettering.";
+    ? "MARKINGS: the pet name is the only text in the image. Every other fabric surface stays plain and unmarked."
+    : "MARKINGS: every fabric surface stays plain and unmarked.";
 
 // Capped hard: this text sits inside the identity block, which must survive
 // well inside the 480-token guard. A description longer than this is almost

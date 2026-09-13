@@ -62,6 +62,12 @@ const getBaseSeed = (requestSeed: number | undefined) => {
   return parsed;
 };
 
+// Garments are described affirmatively rather than by exclusion. flux-lora
+// drops negative_prompt entirely, and FLUX renders whatever nouns appear in the
+// prompt regardless of negation — "no team logo" puts "team logo" in front of
+// the model. So the cap is "plain solid-colour with a blank front panel", and
+// the trousers are stated as present and covering the legs rather than the fur
+// being talked out of existence.
 const getGenerationSubject = (
   basePrompt: string,
   styleName: string,
@@ -74,10 +80,10 @@ const getGenerationSubject = (
     const isBatting = imageIndex % 2 === 0;
 
     if (isBatting) {
-      return `Cute ${triggerWord} as an upright anthropomorphic baseball batter, standing on hind legs in a clean conventional batter stance, wearing a full baseball uniform and cap, both animal forepaws making clear contact with exactly one wooden baseball bat, no fielding glove anywhere in the image, epic ballpark background, dramatic lighting, ultra detailed 8K`;
+      return `Cute ${triggerWord} as an upright anthropomorphic baseball batter on hind legs in a clean conventional batter stance, wearing a plain white baseball jersey, white fabric baseball trousers covering both legs to the ankle, a belt at the waist, and a plain solid-colour baseball cap with a blank front panel. Fur shows only on the head, forepaws and tail. Both animal forepaws grip exactly one wooden baseball bat, with no fielding glove anywhere in the image. Epic ballpark background, dramatic lighting, ultra detailed 8K`;
     }
 
-    return `Cute ${triggerWord} as an upright anthropomorphic baseball fielder, standing on hind legs in a clean athletic fielding stance, wearing a full baseball uniform and cap, exactly one baseball glove naturally fitted over one animal forepaw, no baseball bat anywhere in the image, epic ballpark background, dramatic lighting, ultra detailed 8K`;
+    return `Cute ${triggerWord} as an upright anthropomorphic baseball fielder on hind legs in a clean athletic fielding stance, wearing a plain white baseball jersey, white fabric baseball trousers covering both legs to the ankle, a belt at the waist, and a plain solid-colour baseball cap with a blank front panel. Fur shows only on the head, forepaws and tail. Exactly one leather baseball glove is fitted over one animal forepaw, with no baseball bat anywhere in the image. Epic ballpark background, dramatic lighting, ultra detailed 8K`;
   }
 
   return basePrompt.replaceAll("[TRIGGER_WORD]", triggerWord);
