@@ -2,6 +2,10 @@
 -- Generated 2026-09-13. NOT run by Claude. Review, then apply in Supabase.
 --
 -- Run this BEFORE insert-styles-themes.sql and rewrite-styles-variants.sql.
+--
+-- Safe to re-run. Every statement is idempotent: add column if not exists,
+-- create or replace function, and a guarded constraint. Re-running it after a
+-- successful run is a no-op.
 
 begin;
 
@@ -15,11 +19,21 @@ alter table public.styles add column if not exists category text;
 -- After reviewing `select category, count(*) from public.styles group by 1;`
 -- the constraint below can be enabled. The six values are the ones this
 -- expansion introduces or reuses.
--- alter table public.styles
---   add constraint styles_category_allowed check (category in (
---     'Sports', 'Professions', 'Themes', 'Christmas', 'Thanksgiving',
---     '4th of July', 'Historical', 'Heroes'
---   ));
+-- do $do$
+-- begin
+--   if not exists (
+--     select 1 from pg_constraint
+--     where conname = 'styles_category_allowed'
+--       and conrelid = 'public.styles'::regclass
+--   ) then
+--     alter table public.styles
+--       add constraint styles_category_allowed check (category in (
+--         'Sports', 'Professions', 'Themes', 'Christmas', 'Thanksgiving',
+--         '4th of July', 'Historical', 'Heroes'
+--       ));
+--   end if;
+-- end
+-- $do$;
 
 -- 2. variants ------------------------------------------------------------
 alter table public.styles add column if not exists variants jsonb;
@@ -53,8 +67,23 @@ as $$
       );
 $$;
 
-alter table public.styles
-  add constraint styles_variants_shape check (public.styles_variants_ok(variants));
+-- Postgres has no ADD CONSTRAINT IF NOT EXISTS, so the guard is explicit. This
+-- file has to survive being run twice: a failure further down should not mean
+-- hand-editing it before the retry. A distinct dollar-quote tag ($do$) is used
+-- because the function body above is already quoted with $$.
+do $do$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'styles_variants_shape'
+      and conrelid = 'public.styles'::regclass
+  ) then
+    alter table public.styles
+      add constraint styles_variants_shape check (public.styles_variants_ok(variants));
+  end if;
+end
+$do$;
 
 commit;
 
