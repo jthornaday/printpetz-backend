@@ -5,15 +5,20 @@ type RoleBlueprint = {
   sports?: boolean;
 };
 
-// The global POSE line in fal_utils already covers paws-not-hands and prop
-// support for every role. These blueprints only add what is specific to the
-// role: how many of each prop, and which ones must not co-occur.
+// The global POSE line in fal_utils already describes the forepaws and covers
+// prop support for every role. These blueprints only add what is specific to
+// the role: how many of each prop, and how they are held.
 const roleBlueprints: RoleBlueprint[] = [
   {
     aliases: ["baseball"],
     sports: true,
+    // Counts the props rather than forbidding one of them: both are now in
+    // every image. The old wording ("Batting: ... no glove. Fielding: ... no
+    // bat.") contradicted the subject outright. It also stated both poses in
+    // every prompt; the subject already describes whichever pose is being
+    // rendered, so this line stays a count and nothing more.
     prompt:
-      "Batting: one bat, both paws on the handle, no glove. Fielding: one glove, no bat.",
+      "Exactly one bat and exactly one glove, each in contact with a forepaw.",
     negative:
       "floating baseball bat, duplicate bat, broken bat, bent bat, bat through body, bat through face, bat through arm, detached paw, missing paw on bat, one-handed unsupported batting pose, glove and bat fused together, bat fused with paw, baseball glove with human fingers, bare human hand",
   },
