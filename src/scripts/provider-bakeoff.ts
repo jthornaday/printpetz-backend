@@ -9,6 +9,8 @@
  *   node -r module-alias/register lib/scripts/provider-bakeoff.js --check-references
  *                                                                          # test the photos, spends nothing
  *   node -r module-alias/register lib/scripts/provider-bakeoff.js            # plan + cost, runs nothing
+ *   node -r module-alias/register lib/scripts/provider-bakeoff.js --only=Max/Baseball
+ *                                                                          # one cell, request + response printed
  *   node -r module-alias/register lib/scripts/provider-bakeoff.js --confirm  # actually generates
  *
  * It reads models and styles from Supabase and the training photos from S3,
@@ -542,6 +544,42 @@ const sniffFormat = (bytes: Buffer): string => {
   return `unrecognised (starts ${bytes.toString("hex", 0, 8)})`;
 };
 
+/** Width and height straight out of the file header. No dependency, because a
+ * diagnostic that needs an npm install is a diagnostic nobody runs. */
+const readDimensions = (bytes: Buffer): string => {
+  try {
+    if (bytes.toString("latin1", 1, 4) === "PNG") {
+      return `${bytes.readUInt32BE(16)}x${bytes.readUInt32BE(20)}`;
+    }
+    if (bytes.toString("latin1", 0, 4) === "RIFF" && bytes.toString("latin1", 8, 12) === "WEBP") {
+      const chunk = bytes.toString("latin1", 12, 16);
+      if (chunk === "VP8X") return `${(bytes.readUIntLE(24, 3) & 0xffffff) + 1}x${(bytes.readUIntLE(27, 3) & 0xffffff) + 1}`;
+      if (chunk === "VP8 ") return `${bytes.readUInt16LE(26) & 0x3fff}x${bytes.readUInt16LE(28) & 0x3fff}`;
+      return "webp, variant not parsed";
+    }
+    if (bytes[0] === 0xff && bytes[1] === 0xd8) {
+      // Walk the JPEG segments to the start-of-frame, which carries the size.
+      let offset = 2;
+      while (offset < bytes.length - 9) {
+        if (bytes[offset] !== 0xff) {
+          offset += 1;
+          continue;
+        }
+        const marker = bytes[offset + 1];
+        // SOF0-SOF15, skipping the four that are not frame headers.
+        if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) {
+          return `${bytes.readUInt16BE(offset + 7)}x${bytes.readUInt16BE(offset + 5)}`;
+        }
+        offset += 2 + bytes.readUInt16BE(offset + 2);
+      }
+      return "jpeg, no SOF found";
+    }
+  } catch {
+    return "unreadable";
+  }
+  return "unknown";
+};
+
 const checkReferences = async (pets: Pet[]) => {
   console.log("\n=== REFERENCE PREFLIGHT ===");
   console.log("Fetching every training photo. No OpenAI calls, nothing spent.\n");
@@ -567,16 +605,29 @@ const checkReferences = async (pets: Pet[]) => {
 
           const accepted = ACCEPTED_TYPES.has(actual);
           const tooBig = bytes.length > MAX_REFERENCE_BYTES;
-          const mismatch = declared.split(";")[0].trim() !== actual && accepted;
+          const servedAs = declared.split(";")[0].trim();
+          const dimensions = readDimensions(bytes);
+
+          // OpenAI fetches this URL itself and sees only the Content-Type
+          // header. Valid JPEG bytes served as application/octet-stream are
+          // still a 400 to it, because it never gets as far as the bytes.
+          // An earlier version of this check called that "harmless". It is
+          // not, and saying so sent the last diagnosis down the wrong path.
+          const servedAsImage = ACCEPTED_TYPES.has(servedAs);
 
           if (!accepted) {
             verdict = `FAIL  actual bytes are ${actual} — not PNG, JPEG or WebP`;
+            problems += 1;
+          } else if (!servedAsImage) {
+            verdict =
+              `FAIL  bytes are a valid ${actual}, but the server declares ` +
+              `Content-Type: ${servedAs} — OpenAI reads the header, not the bytes`;
             problems += 1;
           } else if (tooBig) {
             verdict = `FAIL  ${sizeMb}MB exceeds the 50MB limit`;
             problems += 1;
           } else {
-            verdict = `ok    ${actual}, ${sizeMb}MB${mismatch ? ` (served as ${declared}, harmless)` : ""}`;
+            verdict = `ok    ${actual}, ${dimensions}, ${sizeMb}MB`;
           }
         }
       } catch (error) {
@@ -602,6 +653,108 @@ const checkReferences = async (pets: Pet[]) => {
 };
 
 // ---------------------------------------------------------------------------
+// Single-cell debug
+// ---------------------------------------------------------------------------
+
+/**
+ * One OpenAI call, every request parameter printed, the whole response body
+ * printed. For when 52 rows of "400" have told you nothing and you want to see
+ * exactly what went over the wire.
+ *
+ * Costs one image. Requires --confirm as well, so it cannot fire by accident.
+ */
+const debugOneCell = async (pets: Pet[], styles: Style[], target: string) => {
+  const [petName, themeName] = target.split("/");
+  const pet = pets.find(
+    (p) => (p.pet_name ?? "").toLowerCase() === (petName ?? "").toLowerCase(),
+  );
+  const style = styles.find(
+    (st) => st.name.toLowerCase() === (themeName ?? "").toLowerCase(),
+  );
+
+  if (!pet) throw new Error(`No pet named "${petName}". Try: ${pets.map((p) => p.pet_name).join(", ")}`);
+  if (!style) throw new Error(`No theme named "${themeName}". Try: ${THEMES.join(", ")}`);
+
+  const references = (pet.training_images ?? []).slice(0, 5);
+  const prompt = generateIdentityPrompt(
+    buildSubject(style, "the pet", 0, pet.pet_name as string),
+    LOOK_LEVEL,
+    pet.pet_name as string,
+    style.name,
+    pet.pet_description?.trim() || undefined,
+    "reference",
+  );
+
+  const model = process.env.PRINTPETZ_OPENAI_MODEL?.trim() || FLARE;
+  const size = process.env.PRINTPETZ_OPENAI_SIZE?.trim() || "832x1024";
+  const quality = process.env.PRINTPETZ_OPENAI_QUALITY?.trim() || "high";
+
+  console.log("\n=== REQUEST ===\n");
+  console.log(`  pet              ${pet.pet_name} (model ${pet.id})`);
+  console.log(`  theme            ${style.name}`);
+  console.log(`  model            "${model}"`);
+  console.log(`  size             "${size}"`);
+  console.log(`  quality          "${quality}"`);
+  console.log(`  n                1`);
+  console.log(`  output_format    "jpeg"`);
+  console.log(`  prompt           ${prompt.length} chars`);
+  console.log(`  references       ${references.length} of ${(pet.training_images ?? []).length}\n`);
+
+  for (const url of references) {
+    try {
+      const response = await fetch(url);
+      const declared = response.headers.get("content-type") ?? "(none)";
+      const bytes = Buffer.from(await response.arrayBuffer());
+      console.log(`    HTTP ${response.status}  served-as ${declared}  actual ${sniffFormat(bytes)}  ${readDimensions(bytes)}  ${(bytes.length / 1024).toFixed(0)}kB`);
+    } catch (error) {
+      console.log(`    UNFETCHABLE  ${error instanceof Error ? error.message : String(error)}`);
+    }
+    console.log(`      ${url}`);
+  }
+
+  console.log("\n  --- prompt as sent ---");
+  console.log(`  ${prompt}\n`);
+
+  if (!process.argv.includes("--confirm")) {
+    console.log("=== NOT SENT ===\n");
+    console.log("Nothing was sent to OpenAI. Add --confirm to fire this one call.\n");
+    return;
+  }
+
+  console.log("=== SENDING ===\n");
+
+  try {
+    const result = await openAIImageProvider.generate({
+      prompt,
+      modelPath: pet.model_path,
+      referenceImageUrls: references,
+      petName: pet.pet_name as string,
+      seed: BASE_SEED,
+      styleName: style.name,
+    });
+
+    if (result.kind !== "complete") throw new Error("queued result from a synchronous provider");
+
+    const out = path.join(process.cwd(), `debug-${pet.pet_name}-${style.name.replace(/\W+/g, "-")}.jpg`);
+    fs.writeFileSync(out, result.image.buffer);
+    console.log(`  SUCCESS  ${result.providerMeta.latencyMs}ms  $${(result.providerMeta.costUsd ?? 0).toFixed(4)}`);
+    console.log(`  usage    ${JSON.stringify(result.providerMeta.usage)}`);
+    console.log(`  written  ${out}\n`);
+  } catch (error) {
+    if (error instanceof ImageGenerationFailure) {
+      console.log(`  FAILED   HTTP ${error.status ?? "?"} after ${error.elapsedMs ?? "?"}ms`);
+      console.log(`  reason   ${error.reason}`);
+      console.log(`  message  ${error.message}`);
+      console.log("\n  --- response body, verbatim ---");
+      console.log(error.detail ?? "  (the provider captured no body)");
+      console.log("");
+    } else {
+      console.log(`  FAILED   ${error instanceof Error ? error.message : String(error)}\n`);
+    }
+  }
+};
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -611,6 +764,7 @@ const main = async () => {
   console.log("PrintPetz provider bakeoff — FAL vs GPT-Image-2.5");
 
   const checkingReferences = process.argv.includes("--check-references");
+  const onlyFlag = process.argv.find((arg) => arg.startsWith("--only="));
 
   // The reference check is about photos, not themes. Fetching styles it will
   // never read would let an unrelated styles problem block a photo diagnosis.
@@ -626,6 +780,11 @@ const main = async () => {
 
   if (checkingReferences) {
     await checkReferences(pets);
+    return;
+  }
+
+  if (onlyFlag) {
+    await debugOneCell(pets, styles, onlyFlag.slice("--only=".length));
     return;
   }
 
