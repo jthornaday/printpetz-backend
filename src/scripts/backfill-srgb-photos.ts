@@ -104,6 +104,26 @@ const srgbKeyFor = (key: string) => `${key.replace(/\.[^./]+$/, "")}-srgb.jpg`;
 const sqlQuote = (s: string) => `'${s.replace(/'/g, "''")}'`;
 
 /**
+ * models.training_images is a Postgres text[], NOT jsonb.
+ *
+ * An earlier version of this emitted `'[...]'::jsonb` and Postgres refused it
+ * outright: `column "training_images" is of type text[] but expression is of
+ * type jsonb`. Nothing was written, so the failure was loud and harmless -- but
+ * it is worth being explicit, because `string[]` in TypeScript and a JSON array
+ * in the API response both read like jsonb and neither tells you the column
+ * type.
+ *
+ * ARRAY[...] rather than the '{"a","b"}' literal form: the values are URLs and
+ * the ARRAY constructor takes ordinary quoted strings, so the escaping is the
+ * same single-quote doubling used everywhere else here. The curly-brace form
+ * needs its own backslash and double-quote rules on top.
+ */
+const sqlTextArray = (values: string[]) =>
+  values.length === 0
+    ? "ARRAY[]::text[]"
+    : `ARRAY[\n    ${values.map(sqlQuote).join(",\n    ")}\n  ]::text[]`;
+
+/**
  * HEIC, via macOS. sharp's libheif parses the container but cannot decode the
  * pixels, so convertToSrgbJpeg rejects HEIC by design -- that rejection is the
  * whole point of the upload-time fix. Here we are repairing files that already
@@ -442,9 +462,9 @@ const main = async () => {
   for (const { model, petName, urls } of sqlUpdates) {
     lines.push(`-- ${petName} (model ${model.id})`);
     lines.push("-- BEFORE (for the reversal at the bottom):");
-    lines.push(`--   ${JSON.stringify(model.training_images)}`);
+    for (const url of model.training_images ?? []) lines.push(`--   ${url}`);
     lines.push(
-      `update public.models set training_images = ${sqlQuote(JSON.stringify(urls))}::jsonb where id = ${model.id};`,
+      `update public.models set training_images = ${sqlTextArray(urls)}\n  where id = ${model.id};`,
     );
     lines.push("");
   }
@@ -473,7 +493,11 @@ const main = async () => {
     void urls;
     lines.push(`-- ${petName} (model ${model.id})`);
     lines.push(
-      `-- update public.models set training_images = ${sqlQuote(JSON.stringify(model.training_images))}::jsonb where id = ${model.id};`,
+      `-- update public.models set training_images = ${sqlTextArray(
+        model.training_images ?? [],
+      )
+        .split("\n")
+        .join("\n-- ")}\n--   where id = ${model.id};`,
     );
   }
   lines.push("");
