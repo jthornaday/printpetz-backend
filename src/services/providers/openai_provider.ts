@@ -11,6 +11,10 @@ import { addErrorLog } from "../error_logs_service";
 
 const EDITS_ENDPOINT = "https://api.openai.com/v1/images/edits";
 
+// Enough to hold a whole OpenAI error object. 500 truncated the useful part --
+// which image it could not read is at the end of the message, not the start.
+const BODY_CHARS = 4000;
+
 // Published rates, USD per 1M tokens. Text output is not billed: the model
 // returns an image, not prose.
 const RATE_TEXT_INPUT = 5 / 1_000_000;
@@ -103,6 +107,7 @@ const isModerationRefusal = (status: number, body: string) =>
   status === 400 && /moderation|safety|content_policy|rejected/i.test(body);
 
 const callOpenAI = async (body: Record<string, unknown>) => {
+  const callStartedAt = Date.now();
   const apiKey = AppConstants.openaiApiKey;
   if (!apiKey) {
     throw new ImageGenerationFailure(
@@ -153,6 +158,8 @@ const callOpenAI = async (body: Record<string, unknown>) => {
         "provider_error",
         "OpenAI request failed or timed out",
         error instanceof Error ? error.message : String(error),
+        undefined,
+        Date.now() - callStartedAt,
       );
     }
     clearTimeout(timer);
@@ -167,7 +174,9 @@ const callOpenAI = async (body: Record<string, unknown>) => {
           "openai",
           "rate_limit",
           `OpenAI rate limit not cleared after ${maxRateLimitRetries} retries`,
-          text.slice(0, 500),
+          text.slice(0, BODY_CHARS),
+          response.status,
+          Date.now() - callStartedAt,
         );
       }
       const delay = retryDelayMs(response, rateLimitAttempts);
@@ -185,7 +194,9 @@ const callOpenAI = async (body: Record<string, unknown>) => {
         "openai",
         "moderation",
         "OpenAI refused the prompt on moderation grounds",
-        text.slice(0, 500),
+        text.slice(0, BODY_CHARS),
+        response.status,
+        Date.now() - callStartedAt,
       );
     }
 
@@ -202,7 +213,9 @@ const callOpenAI = async (body: Record<string, unknown>) => {
       "openai",
       "provider_error",
       `OpenAI returned ${response.status}`,
-      text.slice(0, 500),
+      text.slice(0, BODY_CHARS),
+      response.status,
+      Date.now() - callStartedAt,
     );
   }
 };

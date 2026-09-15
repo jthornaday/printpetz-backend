@@ -6,6 +6,8 @@
  *
  * Run it:
  *   npm run build
+ *   node -r module-alias/register lib/scripts/provider-bakeoff.js --check-references
+ *                                                                          # test the photos, spends nothing
  *   node -r module-alias/register lib/scripts/provider-bakeoff.js            # plan + cost, runs nothing
  *   node -r module-alias/register lib/scripts/provider-bakeoff.js --confirm  # actually generates
  *
@@ -305,6 +307,8 @@ type Row = {
   openaiLatencyMs?: number;
   openaiCostUsd?: number;
   openaiError?: string;
+  openaiErrorDetail?: string;
+  openaiStatus?: number;
   seed: number;
   referenceCount: number;
 };
@@ -394,8 +398,12 @@ const writeContactSheet = (dir: string, rows: Row[]) => {
         return `<div class="err">FAL failed<br><small>${row.falError}</small></div>`;
       return `<img src="${row.falUrl}" loading="lazy" alt="FAL ${row.pet} ${row.theme}">`;
     }
-    if (row.openaiError)
-      return `<div class="err">OpenAI failed<br><small>${row.openaiError}</small></div>`;
+    if (row.openaiError) {
+      const detail = row.openaiErrorDetail
+        ? `<pre>${row.openaiErrorDetail.replace(/[<&]/g, (c) => (c === "<" ? "&lt;" : "&amp;"))}</pre>`
+        : "";
+      return `<div class="err"><strong>OpenAI failed</strong><br><small>${row.openaiError}</small>${detail}</div>`;
+    }
     return `<img src="${row.openaiFile}" loading="lazy" alt="OpenAI ${row.pet} ${row.theme}">`;
   };
 
@@ -429,7 +437,8 @@ const writeContactSheet = (dir: string, rows: Row[]) => {
   th span { font-weight: 400; color: #555; }
   th small, .meta { color: #777; font-size: 11px; font-weight: 400; }
   img { width: 320px; max-width: 100%; display: block; border-radius: 6px; }
-  .err { width: 320px; padding: 24px; background: #fff0f0; color: #a00; border-radius: 6px; }
+  .err { width: 320px; padding: 16px; background: #fff0f0; color: #a00; border-radius: 6px; }
+  .err pre { white-space: pre-wrap; word-break: break-word; font-size: 10px; margin: 8px 0 0; color: #700; max-height: 240px; overflow: auto; }
   .score label { display: block; white-space: nowrap; font-size: 12px; }
   td.score { width: 120px; }
 </style>
@@ -462,7 +471,9 @@ const writeCsv = (dir: string, rows: Row[]) => {
     "fal_url",
     "openai_latency_ms",
     "openai_cost_usd",
+    "openai_status",
     "openai_error",
+    "openai_error_detail",
     "openai_file",
   ];
   const escape = (v: unknown) => {
@@ -484,7 +495,9 @@ const writeCsv = (dir: string, rows: Row[]) => {
         r.falUrl,
         r.openaiLatencyMs,
         r.openaiCostUsd?.toFixed(6),
+        r.openaiStatus,
         r.openaiError,
+        r.openaiErrorDetail,
         r.openaiFile,
       ]
         .map(escape)
@@ -492,6 +505,100 @@ const writeCsv = (dir: string, rows: Row[]) => {
     );
   }
   fs.writeFileSync(path.join(dir, "results.csv"), lines.join("\n"));
+};
+
+
+// ---------------------------------------------------------------------------
+// Reference preflight
+// ---------------------------------------------------------------------------
+
+// What OpenAI's images endpoint will accept. Anything else is a 400 before a
+// single token is spent.
+const ACCEPTED_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
+const MAX_REFERENCE_BYTES = 50 * 1024 * 1024;
+
+/**
+ * What the bytes actually are, regardless of what the URL or the Content-Type
+ * claims. An iPhone photo saved as ".jpg" is very often still HEIC inside, and
+ * that is invisible until something tries to decode it.
+ */
+const sniffFormat = (bytes: Buffer): string => {
+  if (bytes.length < 12) return "too short to identify";
+  if (bytes[0] === 0x89 && bytes.toString("latin1", 1, 4) === "PNG") return "image/png";
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+  if (bytes.toString("latin1", 0, 4) === "RIFF" && bytes.toString("latin1", 8, 12) === "WEBP") {
+    return "image/webp";
+  }
+  if (bytes.toString("latin1", 0, 4) === "GIF8") return "image/gif";
+
+  // ISO base media container: the brand at offset 8 says which flavour.
+  if (bytes.toString("latin1", 4, 8) === "ftyp") {
+    const brand = bytes.toString("latin1", 8, 12);
+    if (/^(heic|heix|hevc|hevx|mif1|msf1)$/.test(brand)) return `image/heic (brand ${brand})`;
+    if (brand === "avif") return "image/avif";
+    return `iso container, brand ${brand}`;
+  }
+
+  return `unrecognised (starts ${bytes.toString("hex", 0, 8)})`;
+};
+
+const checkReferences = async (pets: Pet[]) => {
+  console.log("\n=== REFERENCE PREFLIGHT ===");
+  console.log("Fetching every training photo. No OpenAI calls, nothing spent.\n");
+
+  let problems = 0;
+
+  for (const pet of pets) {
+    const urls = (pet.training_images ?? []).slice(0, 5);
+    console.log(`${pet.pet_name} (model ${pet.id}) — ${urls.length} reference(s) of ${(pet.training_images ?? []).length} total`);
+
+    for (const url of urls) {
+      let verdict: string;
+      try {
+        const response = await fetch(url);
+        if (!response.ok) {
+          verdict = `FAIL  HTTP ${response.status} — OpenAI cannot fetch this either`;
+          problems += 1;
+        } else {
+          const declared = response.headers.get("content-type") ?? "(none)";
+          const bytes = Buffer.from(await response.arrayBuffer());
+          const actual = sniffFormat(bytes);
+          const sizeMb = (bytes.length / 1024 / 1024).toFixed(2);
+
+          const accepted = ACCEPTED_TYPES.has(actual);
+          const tooBig = bytes.length > MAX_REFERENCE_BYTES;
+          const mismatch = declared.split(";")[0].trim() !== actual && accepted;
+
+          if (!accepted) {
+            verdict = `FAIL  actual bytes are ${actual} — not PNG, JPEG or WebP`;
+            problems += 1;
+          } else if (tooBig) {
+            verdict = `FAIL  ${sizeMb}MB exceeds the 50MB limit`;
+            problems += 1;
+          } else {
+            verdict = `ok    ${actual}, ${sizeMb}MB${mismatch ? ` (served as ${declared}, harmless)` : ""}`;
+          }
+        }
+      } catch (error) {
+        verdict = `FAIL  unfetchable: ${error instanceof Error ? error.message : String(error)}`;
+        problems += 1;
+      }
+
+      const shortUrl = url.length > 76 ? `${url.slice(0, 40)}...${url.slice(-33)}` : url;
+      console.log(`  ${verdict}`);
+      console.log(`        ${shortUrl}`);
+    }
+    console.log("");
+  }
+
+  if (problems === 0) {
+    console.log("Every reference is fetchable and in an accepted format.");
+    console.log("If OpenAI still 400s, the cause is the prompt, not the photos —");
+    console.log("rerun the bakeoff and read openai_error_detail in the CSV.\n");
+  } else {
+    console.log(`${problems} reference(s) OpenAI will reject. Those pets cannot run until the`);
+    console.log("photos are converted or re-uploaded. No point rerunning the bakeoff first.\n");
+  }
 };
 
 // ---------------------------------------------------------------------------
@@ -516,6 +623,11 @@ const main = async () => {
     console.log(
       `\n  WARNING: themes not found in styles, skipped: ${missingThemes.join(", ")}`,
     );
+  }
+
+  if (process.argv.includes("--check-references")) {
+    await checkReferences(pets);
+    return;
   }
 
   const cells = buildMatrix(pets, styles);
@@ -619,13 +731,21 @@ const main = async () => {
       row.openaiLatencyMs = result.providerMeta.latencyMs;
       row.openaiCostUsd = result.providerMeta.costUsd;
     } catch (error) {
-      row.openaiError =
-        error instanceof ImageGenerationFailure
-          ? `${error.reason}: ${error.message}`
-          : error instanceof Error
-            ? error.message
-            : String(error);
+      if (error instanceof ImageGenerationFailure) {
+        row.openaiError = `${error.reason}: ${error.message}`;
+        // The body is the whole diagnosis. "OpenAI returned 400" says nothing;
+        // the body names the image it could not read or the term it objected
+        // to. Dropping it was what made the first run unreadable.
+        row.openaiErrorDetail = error.detail;
+        row.openaiStatus = error.status;
+        row.openaiLatencyMs = error.elapsedMs;
+      } else {
+        row.openaiError = error instanceof Error ? error.message : String(error);
+      }
       console.log(`      OpenAI failed: ${row.openaiError}`);
+      if (row.openaiErrorDetail) {
+        console.log(`        body: ${row.openaiErrorDetail.slice(0, 400)}`);
+      }
     }
 
     rows.push(row);

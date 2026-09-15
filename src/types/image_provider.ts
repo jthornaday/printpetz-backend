@@ -55,19 +55,28 @@ export type GenerateImageResult =
 export class ImageGenerationFailure extends Error {
   readonly provider: ImageProviderName;
   readonly reason: "moderation" | "rate_limit" | "provider_error";
+  /** The provider's response body. "OpenAI returned 400" is not a diagnosis;
+   * the body says which of the images it could not read, or which term it
+   * objected to. Whatever surfaces this must carry it through. */
   readonly detail?: string;
+  readonly status?: number;
+  readonly elapsedMs?: number;
 
   constructor(
     provider: ImageProviderName,
     reason: "moderation" | "rate_limit" | "provider_error",
     message: string,
     detail?: string,
+    status?: number,
+    elapsedMs?: number,
   ) {
     super(message);
     this.name = "ImageGenerationFailure";
     this.provider = provider;
     this.reason = reason;
     this.detail = detail;
+    this.status = status;
+    this.elapsedMs = elapsedMs;
   }
 }
 
