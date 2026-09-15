@@ -3,20 +3,23 @@ import AsyncHandler from "@/context/async_handler";
 import {
   EditorLook,
   handleEditImageLook,
-  handleGenerateImage,
   handleRemoveBackground,
 } from "@/services/fal_service";
 import {
   addGeneration,
   getGenerationById,
+  uploadGenerationImageBuffer,
 } from "@/services/generation_service";
+import { getImageProvider } from "@/services/providers";
+import { logOpenAIFailure } from "@/services/providers/openai_provider";
 import { getFileBufferFromUrl } from "@/services/file_service";
 import { getModelById } from "@/services/model_service";
 import { getStyleById } from "@/services/style_service";
 import { updateUserCredit } from "@/services/user_service";
 import { EGenerationStatus } from "@/types/generation";
+import { ImageGenerationFailure } from "@/types/image_provider";
 import errorResponse from "@/utils/errors/errorResponse";
-import { generateIdentityPrompt } from "@/utils/fal_utils";
+import { generateIdentityPrompt, GenerationLane } from "@/utils/fal_utils";
 import { getModelTriggerWord } from "@/utils/model_utils";
 import { getVariantForImage } from "@/utils/prompt_variants";
 import { generateImageSchema } from "@/utils/validation/generation_validation_schema";
@@ -141,6 +144,21 @@ const getGenerationSubject = (
   return `${subjectWithStop} ${variant[0].toUpperCase()}${variant.slice(1)}`;
 };
 
+// generations.provider and generations.provider_model arrive in
+// add-generations-provider-columns.sql, which Jake runs by hand. Supabase
+// rejects an insert naming a column that does not exist, so writing them
+// unconditionally would fail EVERY generation on any deploy that reached
+// production before the SQL did -- not just the OpenAI ones.
+//
+// The flag makes that ordering impossible to get wrong instead of merely
+// documenting it. Off by default; set PRINTPETZ_PROVIDER_COLUMNS=true once the
+// columns exist.
+const providerColumnsEnabled = () =>
+  /^(1|true|yes)$/i.test(process.env.PRINTPETZ_PROVIDER_COLUMNS?.trim() ?? "");
+
+const providerColumns = (provider: string, providerModel: string) =>
+  providerColumnsEnabled() ? { provider, provider_model: providerModel } : {};
+
 const createImage = AsyncHandler.handle(async (req, res) => {
   const user = req.user;
   const { numberOfImages, styleId, modelId, cutenessLevel, seed } =
@@ -167,11 +185,26 @@ const createImage = AsyncHandler.handle(async (req, res) => {
 
   const petName = model.pet_name?.trim() || model.name;
   const petDescription = model.pet_description?.trim() || undefined;
-  const triggerWord = getModelTriggerWord(model.model_path, model.name);
+
+  const provider = getImageProvider();
+  const lane: GenerationLane =
+    provider.name === "openai" ? "reference" : "lora";
+
+  // The LoRA trigger word is a FLUX artefact: it names the weights the pet was
+  // trained into. A reference-image provider has no such weights, and passing
+  // "TOK" to one just puts the literal string in the picture -- which FLUX
+  // itself did on two of four Wizard caps on 13 Sept. The reference lane names
+  // the subject in plain English instead.
+  const triggerWord =
+    lane === "reference"
+      ? "the pet"
+      : getModelTriggerWord(model.model_path, model.name);
+
   const baseSeed = getBaseSeed(seed);
   const group_id = Date.now();
   const variantOffset = getVariantOffset(group_id);
-  const generations = await Promise.all(
+
+  const results = await Promise.all(
     Array.from({ length: numberOfImages }).map(async (_, imageIndex) => {
       const subject = getGenerationSubject(
         style.base_prompt,
@@ -188,29 +221,108 @@ const createImage = AsyncHandler.handle(async (req, res) => {
         petName,
         style.name,
         petDescription,
+        lane,
       );
       const imageSeed = getImageSeed(baseSeed, imageIndex);
-      const requestId = await handleGenerateImage(
-        prompt,
-        model.model_path,
-        imageSeed,
-        style.name,
-      );
 
-      return addGeneration({
+      const common = {
         group_id,
-        request_id: requestId.toString(),
-        status: EGenerationStatus.GENERATING,
         model_id: modelId,
         style_id: styleId,
         user_id: user.id,
         prompt,
         seed: imageSeed,
-      });
+      };
+
+      try {
+        const result = await provider.generate({
+          prompt,
+          modelPath: model.model_path,
+          referenceImageUrls: model.training_images ?? [],
+          petName,
+          seed: imageSeed,
+          styleName: style.name,
+        });
+
+        // The whole point of the union. A queued provider gets a row to finish
+        // later via its webhook; a synchronous one already has the bytes, so
+        // the row is born complete and nothing ever calls back for it.
+        if (result.kind === "queued") {
+          const generation = await addGeneration({
+            ...common,
+            ...providerColumns(result.provider, result.providerModel),
+            request_id: result.requestId,
+            status: EGenerationStatus.GENERATING,
+          });
+          return { billable: true, generation };
+        }
+
+        const imageUrl = await uploadGenerationImageBuffer(
+          user.id,
+          result.image.buffer,
+          result.image.contentType,
+          result.image.extension,
+        );
+
+        if (!imageUrl) {
+          throw new ImageGenerationFailure(
+            result.provider,
+            "provider_error",
+            "Generated image could not be stored",
+          );
+        }
+
+        const generation = await addGeneration({
+          ...common,
+          ...providerColumns(result.provider, result.providerModel),
+          request_id: result.providerMeta.responseId ?? null,
+          status: EGenerationStatus.COMPLETED,
+          image: imageUrl,
+        });
+        return { billable: true, generation };
+      } catch (error) {
+        // A failure the customer did not get an image from is a failure the
+        // customer does not pay for -- the same rule as any other AI failure.
+        // Only synchronous providers reach here; a FAL failure surfaces later
+        // through its webhook and is handled there as it always has been.
+        const failure =
+          error instanceof ImageGenerationFailure
+            ? error
+            : new ImageGenerationFailure(
+                provider.name,
+                "provider_error",
+                error instanceof Error ? error.message : String(error),
+              );
+
+        if (failure.provider === "openai") {
+          logOpenAIFailure(failure, {
+            styleName: style.name,
+            modelId,
+            imageIndex,
+          });
+        }
+
+        const generation = await addGeneration({
+          ...common,
+          ...providerColumns(failure.provider, provider.name),
+          status: EGenerationStatus.ERROR,
+          error: { reason: failure.reason, message: failure.message },
+        });
+        return { billable: false, generation };
+      }
     }),
   );
 
-  await updateUserCredit(user.id, generationCharge, false);
+  const generations = results.map((result) => result.generation);
+  const billableCount = results.filter((result) => result.billable).length;
+
+  if (billableCount > 0) {
+    await updateUserCredit(
+      user.id,
+      AppConstants.imageGenerationCredit * billableCount,
+      false,
+    );
+  }
 
   res.dataCreateSuccess({ data: { generations } });
 });
@@ -218,7 +330,9 @@ const createImage = AsyncHandler.handle(async (req, res) => {
 const downloadImage = AsyncHandler.handle(async (req, res) => {
   const generationId = Number(req.params.id);
   if (!Number.isInteger(generationId) || generationId <= 0) {
-    throw errorResponse.Api400Error({ errorDescription: "Invalid generation id" });
+    throw errorResponse.Api400Error({
+      errorDescription: "Invalid generation id",
+    });
   }
 
   const generation = await getGenerationById(generationId);
@@ -229,9 +343,12 @@ const downloadImage = AsyncHandler.handle(async (req, res) => {
   const imageUrl = generation.image;
   const pathname = new URL(imageUrl).pathname;
   const rawExtension = pathname.split(".").pop()?.toLowerCase();
-  const extension = rawExtension && ["png", "jpg", "jpeg", "webp", "gif"].includes(rawExtension)
-    ? rawExtension === "jpeg" ? "jpg" : rawExtension
-    : "png";
+  const extension =
+    rawExtension && ["png", "jpg", "jpeg", "webp", "gif"].includes(rawExtension)
+      ? rawExtension === "jpeg"
+        ? "jpg"
+        : rawExtension
+      : "png";
 
   const contentTypes: Record<string, string> = {
     png: "image/png",
@@ -243,7 +360,10 @@ const downloadImage = AsyncHandler.handle(async (req, res) => {
   const buffer = await getFileBufferFromUrl(imageUrl, contentTypes[extension]);
   const filename = `printpetz_${generation.id}_${Date.now()}.${extension}`;
 
-  res.setHeader("Content-Type", contentTypes[extension] ?? "application/octet-stream");
+  res.setHeader(
+    "Content-Type",
+    contentTypes[extension] ?? "application/octet-stream",
+  );
   res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
   res.setHeader("Content-Length", buffer.length.toString());
   res.send(buffer);

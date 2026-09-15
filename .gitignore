@@ -74,3 +74,6 @@ lib/**/*.json
 lib/**/*.js.map
 lib/
 .qodo
+
+# Bakeoff output: generated images and contact sheets, not source.
+scripts/bakeoff/

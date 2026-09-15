@@ -19,6 +19,9 @@ export default class AppConstants {
 
   static falApiKey = process.env.FAL_API_KEY;
 
+  // Set in Elastic Beanstalk only. Never committed, never sent to the frontend.
+  static openaiApiKey = process.env.OPENAI_API_KEY;
+
   static serverBaseUrl = process.env.SERVER_BASE_URL;
   static clientBaseUrl = process.env.CLIENT_BASE_URL || "https://printpetz.com";
 

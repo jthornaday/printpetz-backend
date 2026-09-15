@@ -39,11 +39,7 @@ export const addGeneration = async (input: Partial<IGeneration>) => {
 export const getGenerationById = async (id: number) => {
   const { data, error } = await retrySupabase<IGeneration>(
     async () =>
-      await supabase
-        .from(tables.generations)
-        .select("*")
-        .eq("id", id)
-        .single(),
+      await supabase.from(tables.generations).select("*").eq("id", id).single(),
   );
 
   if (error) {
@@ -127,6 +123,29 @@ export const deleteGenerationForUser = async (id: number, userId: string) => {
   }
 
   return Boolean(data);
+};
+
+/**
+ * Upload an image we already hold in memory and return its CloudFront URL.
+ *
+ * The FAL lane never needs this: fal hands back a URL and
+ * handleImageUploadAndSave streams it across. A synchronous provider returns
+ * the bytes themselves, and the row cannot be inserted until they have a home,
+ * so the upload has to happen before the insert rather than after it.
+ */
+export const uploadGenerationImageBuffer = async (
+  userId: string,
+  buffer: Buffer,
+  contentType: string,
+  extension: string,
+) => {
+  const fileName = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}.${extension}`;
+
+  return uploadFileToS3({
+    buffer,
+    fileType: contentType,
+    Key: `${EUploadPath.GENERATION_IMAGE.replace("[USER_ID]", userId)}/${fileName}`,
+  });
 };
 
 const handleImageUploadAndSave = async (

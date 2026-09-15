@@ -302,11 +302,24 @@ const getPetDescriptionClause = (petDescription?: string) => {
     .replace(/[,;:.\s]+$/, "");
 };
 
-const getIdentityPrompt = (petDescription?: string) => {
+/** Which lane is assembling this prompt. "lora" carries the pet's identity in
+ * trained weights; "reference" carries it in attached photographs. */
+export type GenerationLane = "lora" | "reference";
+
+// "the trained pet" is a LoRA sentence: it points at weights the model carries.
+// A reference-image provider has no trained pet, it has photographs, and
+// telling it to preserve the identity of something it was never trained on is
+// the kind of wording that invents a lookalike. Same clause, different referent.
+const getIdentityPrompt = (
+  petDescription?: string,
+  lane: GenerationLane = "lora",
+) => {
   const description = getPetDescriptionClause(petDescription);
+  const referent =
+    lane === "reference" ? "the pet in the reference photographs" : "the trained pet";
   const subject = description
-    ? `one pet only, the trained pet — ${description}`
-    : "one pet only, the trained pet";
+    ? `one pet only, ${referent} — ${description}`
+    : `one pet only, ${referent}`;
 
   return `IDENTITY: ${subject}. Keep its exact coat color and pattern, markings, breed, build, muzzle length and projection, ears, nose and eye color. Never lighten or recolor the coat.`;
 };
@@ -323,13 +336,14 @@ export const generateIdentityPrompt = (
   petName?: string,
   styleName?: string,
   petDescription?: string,
+  lane: GenerationLane = "lora",
 ) => {
   const roleBlueprint = getRoleBlueprintPrompt(styleName);
   const namePrompt = getPetNamePrompt(petName, styleName);
 
   const prompt = [
     subject.trim().replace(/\.?$/, "."),
-    getIdentityPrompt(petDescription),
+    getIdentityPrompt(petDescription, lane),
     namePrompt.trim(),
     getLookPrompt(lookLevel),
     POSE_PROMPT,
