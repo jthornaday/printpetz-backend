@@ -85,8 +85,8 @@ const PET_PICKS: PetPick[] = [
   {
     modelId: 16,
     petName: "George",
-    species: "unconfirmed",
-    note: "George 1.0 - the only one of Darla/Moses/George with pet_name set, so the newest of the three. SPECIES UNCONFIRMED: if George is a cat, this matrix is three cats and one dog. Swap to 13 (Darla 1) or 14 (Moses 1) for a second dog",
+    species: "dog",
+    note: "George 1.0 - confirmed a dog by Jake, 14 Sept. Second dog in the matrix",
   },
 ];
 
