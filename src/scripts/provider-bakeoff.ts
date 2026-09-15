@@ -6,6 +6,8 @@
  *
  * Run it:
  *   npm run build
+ *   node -r module-alias/register lib/scripts/provider-bakeoff.js --audit-color
+ *                                                                          # every model's photos, read only
  *   node -r module-alias/register lib/scripts/provider-bakeoff.js --check-references
  *                                                                          # test the photos, spends nothing
  *   node -r module-alias/register lib/scripts/provider-bakeoff.js            # plan + cost, runs nothing
@@ -25,6 +27,7 @@ import dotenv from "dotenv";
 dotenv.config({ path: ".env" });
 
 import fs from "node:fs";
+import zlib from "node:zlib";
 import path from "node:path";
 
 import supabase from "@/supabase/create_client";
@@ -653,6 +656,240 @@ const checkReferences = async (pets: Pet[]) => {
 };
 
 // ---------------------------------------------------------------------------
+// Colour-profile audit
+// ---------------------------------------------------------------------------
+
+// Pull the embedded ICC profile out of a JPEG. It can be split across several
+// APP2 segments, so they are collected in sequence order and concatenated.
+const jpegIccProfile = (bytes: Buffer): Buffer | null => {
+  const chunks: Array<{ seq: number; data: Buffer }> = [];
+  let offset = 2;
+  while (offset < bytes.length - 4) {
+    if (bytes[offset] !== 0xff) {
+      offset += 1;
+      continue;
+    }
+    const marker = bytes[offset + 1];
+    if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
+      offset += 2;
+      continue;
+    }
+    if (marker === 0xda || marker === 0xd9) break; // start of scan, end of image
+    const length = bytes.readUInt16BE(offset + 2);
+    if (marker === 0xe2 && bytes.toString("latin1", offset + 4, offset + 15) === "ICC_PROFILE") {
+      chunks.push({ seq: bytes[offset + 16], data: bytes.subarray(offset + 18, offset + 2 + length) });
+    }
+    offset += 2 + length;
+  }
+  if (!chunks.length) return null;
+  chunks.sort((a, b) => a.seq - b.seq);
+  return Buffer.concat(chunks.map((c) => c.data));
+};
+
+/**
+ * The profile's human-readable name, from its 'desc' tag.
+ *
+ * ICC v4 stores it as 'mluc', whose strings are UTF-16BE. Node only decodes
+ * LE, hence the byte swap. The record layout is count/size at 8/12, then
+ * language 16, country 18, LENGTH 20, OFFSET 24 -- getting those last two
+ * wrong reads past the string and returns mojibake that still starts with the
+ * right words, which is exactly the sort of bug that survives a spot check.
+ */
+const iccDescription = (profile: Buffer): string | null => {
+  if (profile.length < 132) return null;
+  const tagCount = profile.readUInt32BE(128);
+
+  for (let i = 0; i < tagCount; i += 1) {
+    const entry = 132 + i * 12;
+    if (entry + 12 > profile.length) break;
+    if (profile.toString("latin1", entry, entry + 4) !== "desc") continue;
+
+    const at = profile.readUInt32BE(entry + 4);
+    if (at + 28 > profile.length) return null;
+    const type = profile.toString("latin1", at, at + 4);
+
+    if (type === "desc") {
+      const n = profile.readUInt32BE(at + 8);
+      return profile.toString("latin1", at + 12, at + 12 + n).replace(/\0.*$/, "").trim() || null;
+    }
+    if (type === "mluc") {
+      const len = profile.readUInt32BE(at + 20);
+      const strAt = profile.readUInt32BE(at + 24);
+      if (at + strAt + len > profile.length) return null;
+      const raw = Buffer.from(profile.subarray(at + strAt, at + strAt + len));
+      raw.swap16();
+      return raw.toString("utf16le").replace(/\0/g, "").trim() || null;
+    }
+  }
+  return null;
+};
+
+const pngProfileName = (bytes: Buffer): string | null => {
+  let offset = 8;
+  let sawSrgbChunk = false;
+  while (offset + 8 < bytes.length) {
+    const length = bytes.readUInt32BE(offset);
+    const type = bytes.toString("latin1", offset + 4, offset + 8);
+    if (type === "sRGB") sawSrgbChunk = true;
+    if (type === "iCCP") {
+      const body = bytes.subarray(offset + 8, offset + 8 + length);
+      const nul = body.indexOf(0);
+      const name = body.toString("latin1", 0, nul);
+      try {
+        return iccDescription(zlib.inflateSync(body.subarray(nul + 2))) || name;
+      } catch {
+        return name;
+      }
+    }
+    if (type === "IDAT" || type === "IEND") break;
+    offset += 12 + length;
+  }
+  return sawSrgbChunk ? "sRGB" : null;
+};
+
+const readColorProfile = (bytes: Buffer): string | null => {
+  if (bytes[0] === 0xff && bytes[1] === 0xd8) {
+    const profile = jpegIccProfile(bytes);
+    return profile ? iccDescription(profile) : null;
+  }
+  if (bytes.toString("latin1", 1, 4) === "PNG") return pngProfileName(bytes);
+  return null;
+};
+
+type Verdict = "heic" | "other-format" | "non-srgb" | "srgb" | "no-profile" | "unfetchable";
+
+/**
+ * Verdicts are grounded in the bakeoff, not in theory:
+ *   Max     -- all four JPEGs carry an Apple "Display P3" profile, 0/13 passed.
+ *   Wizard  -- all five JPEGs carry NO profile at all, 13/13 passed.
+ * So an absent profile is fine and an explicit wide-gamut one is fatal. Note
+ * that `sips -g profile` reports "sRGB IEC61966-2.1" for Wizard's files even
+ * though they have no embedded profile -- it reports the assumed space, not
+ * what is in the file. That conflation would have put every Wizard photo in
+ * the wrong bucket here.
+ */
+const classify = (format: string, profile: string | null): Verdict => {
+  if (format.startsWith("image/heic")) return "heic";
+  if (!["image/png", "image/jpeg", "image/webp"].includes(format)) return "other-format";
+  if (!profile) return "no-profile";
+  return /s\s*rgb/i.test(profile) ? "srgb" : "non-srgb";
+};
+
+const auditColorProfiles = async () => {
+  const { data, error } = await supabase
+    .from(tables.models)
+    .select("id,name,pet_name,status,is_deleted,training_images")
+    .order("id");
+
+  if (error) throw new Error(`Could not read models: ${error.message}`);
+
+  const models = (data ?? []) as Array<{
+    id: number;
+    name: string;
+    pet_name: string | null;
+    status: string;
+    is_deleted: boolean;
+    training_images: string[] | null;
+  }>;
+
+  console.log("\n=== COLOUR PROFILE AUDIT ===");
+  console.log("Read only. Every photo is fetched into memory and inspected.");
+  console.log("No file, S3 object or database row is written.\n");
+
+  const totals: Record<Verdict, number> = {
+    heic: 0, "other-format": 0, "non-srgb": 0, srgb: 0, "no-profile": 0, unfetchable: 0,
+  };
+  const profileNames = new Map<string, number>();
+  const perModel: string[] = [];
+  let checked = 0;
+
+  for (const model of models) {
+    const urls = model.training_images ?? [];
+    if (urls.length === 0) continue;
+
+    const counts: Record<Verdict, number> = {
+      heic: 0, "other-format": 0, "non-srgb": 0, srgb: 0, "no-profile": 0, unfetchable: 0,
+    };
+    const names = new Set<string>();
+
+    // Six at a time: enough to keep this to a couple of minutes, few enough
+    // not to look like an attack on our own CDN.
+    for (let i = 0; i < urls.length; i += 6) {
+      await Promise.all(
+        urls.slice(i, i + 6).map(async (url) => {
+          try {
+            const response = await fetch(url);
+            if (!response.ok) {
+              counts.unfetchable += 1;
+              return;
+            }
+            const bytes = Buffer.from(await response.arrayBuffer());
+            const format = sniffFormat(bytes);
+            const profile = readColorProfile(bytes);
+            const verdict = classify(format, profile);
+            counts[verdict] += 1;
+            if (verdict === "non-srgb" && profile) {
+              names.add(profile);
+              profileNames.set(profile, (profileNames.get(profile) ?? 0) + 1);
+            }
+          } catch {
+            counts.unfetchable += 1;
+          }
+        }),
+      );
+    }
+
+    checked += urls.length;
+    for (const key of Object.keys(counts) as Verdict[]) totals[key] += counts[key];
+
+    const broken = counts.heic + counts["non-srgb"] + counts["other-format"] + counts.unfetchable;
+    const label = `${model.pet_name?.trim() || model.name} (id ${model.id})`;
+    const flag = broken > 0 ? "BROKEN" : "ok    ";
+    const detail = [
+      counts.heic ? `${counts.heic} HEIC` : "",
+      counts["non-srgb"] ? `${counts["non-srgb"]} non-sRGB${names.size ? ` [${[...names].join(", ")}]` : ""}` : "",
+      counts["other-format"] ? `${counts["other-format"]} other-format` : "",
+      counts.unfetchable ? `${counts.unfetchable} unfetchable` : "",
+      counts.srgb ? `${counts.srgb} sRGB` : "",
+      counts["no-profile"] ? `${counts["no-profile"]} no-profile` : "",
+    ].filter(Boolean).join(", ");
+
+    const line = `  ${flag} ${label.padEnd(28)} ${String(urls.length).padStart(3)} photo(s)  ${detail}`;
+    perModel.push(line);
+    console.log(line + (model.is_deleted ? "  [deleted]" : "") + (model.status !== "COMPLETED" ? `  [${model.status}]` : ""));
+  }
+
+  const usable = totals.srgb + totals["no-profile"];
+  const rejected = totals.heic + totals["non-srgb"] + totals["other-format"];
+
+  console.log("\n=== TOTALS ===\n");
+  console.log(`  models with photos        ${perModel.length}`);
+  console.log(`  training photos checked   ${checked}`);
+  console.log("");
+  console.log(`  OpenAI would accept       ${usable}`);
+  console.log(`    sRGB profile            ${totals.srgb}`);
+  console.log(`    no embedded profile     ${totals["no-profile"]}   (Wizard's case -- passed 13/13)`);
+  console.log("");
+  console.log(`  OpenAI would reject       ${rejected}`);
+  console.log(`    HEIC                    ${totals.heic}`);
+  console.log(`    non-sRGB profile        ${totals["non-srgb"]}   (Max's case -- failed 13/13)`);
+  console.log(`    other format            ${totals["other-format"]}`);
+  console.log(`  unfetchable               ${totals.unfetchable}`);
+
+  if (profileNames.size) {
+    console.log("\n  non-sRGB profiles seen:");
+    for (const [name, n] of [...profileNames].sort((a, b) => b[1] - a[1])) {
+      console.log(`    ${String(n).padStart(4)}  ${name}`);
+    }
+  }
+
+  const brokenModels = perModel.filter((l) => l.includes("BROKEN")).length;
+  console.log(`\n  models with at least one unusable photo: ${brokenModels} of ${perModel.length}`);
+  console.log("\n  A model is unusable on OpenAI if ANY of its references is bad:");
+  console.log("  they all go in one request, so one photo fails every theme.\n");
+};
+
+// ---------------------------------------------------------------------------
 // Single-cell debug
 // ---------------------------------------------------------------------------
 
@@ -764,7 +1001,15 @@ const main = async () => {
   console.log("PrintPetz provider bakeoff — FAL vs GPT-Image-2.5");
 
   const checkingReferences = process.argv.includes("--check-references");
+  const auditingColor = process.argv.includes("--audit-color");
   const onlyFlag = process.argv.find((arg) => arg.startsWith("--only="));
+
+  // The audit covers every model in the table, not the four pinned picks, so
+  // it runs before pet resolution and returns without touching anything else.
+  if (auditingColor) {
+    await auditColorProfiles();
+    return;
+  }
 
   // The reference check is about photos, not themes. Fetching styles it will
   // never read would let an unrelated styles problem block a photo diagnosis.
