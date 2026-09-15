@@ -610,12 +610,24 @@ const main = async () => {
 
   console.log("PrintPetz provider bakeoff — FAL vs GPT-Image-2.5");
 
-  const [pets, styles] = await Promise.all([fetchPets(), fetchStyles()]);
+  const checkingReferences = process.argv.includes("--check-references");
+
+  // The reference check is about photos, not themes. Fetching styles it will
+  // never read would let an unrelated styles problem block a photo diagnosis.
+  const [pets, styles] = await Promise.all([
+    fetchPets(),
+    checkingReferences ? Promise.resolve([] as Style[]) : fetchStyles(),
+  ]);
 
   if (pets.length === 0)
     throw new Error(
       "None of the pinned model ids are usable. See the warnings above.",
     );
+
+  if (checkingReferences) {
+    await checkReferences(pets);
+    return;
+  }
 
   const foundThemes = styles.map((s) => s.name);
   const missingThemes = THEMES.filter((t) => !foundThemes.includes(t));
@@ -623,11 +635,6 @@ const main = async () => {
     console.log(
       `\n  WARNING: themes not found in styles, skipped: ${missingThemes.join(", ")}`,
     );
-  }
-
-  if (process.argv.includes("--check-references")) {
-    await checkReferences(pets);
-    return;
   }
 
   const cells = buildMatrix(pets, styles);
