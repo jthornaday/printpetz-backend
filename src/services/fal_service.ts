@@ -114,7 +114,10 @@ const resolveLoraScale = (isFluxModel: boolean) => {
   const requested = readFloatEnv("PRINTPETZ_LORA_SCALE", fallback);
 
   if (requested < LORA_SCALE_MIN || requested > LORA_SCALE_MAX) {
-    const clamped = Math.min(Math.max(requested, LORA_SCALE_MIN), LORA_SCALE_MAX);
+    const clamped = Math.min(
+      Math.max(requested, LORA_SCALE_MIN),
+      LORA_SCALE_MAX,
+    );
     // eslint-disable-next-line no-console
     console.warn(
       `[generation-config] PRINTPETZ_LORA_SCALE=${requested} is outside fal's documented ${LORA_SCALE_MIN}-${LORA_SCALE_MAX} range for loras[].scale. Clamping to ${clamped}.`,
@@ -125,6 +128,102 @@ const resolveLoraScale = (isFluxModel: boolean) => {
   return requested;
 };
 
+/**
+ * Everything that decides what fal is asked for, with nothing about HOW the
+ * request is sent.
+ *
+ * Extracted so the bakeoff can run the FAL arm synchronously through
+ * fal.subscribe while production keeps using the queue and its webhook. A
+ * bakeoff arm that built its own input would be measuring a different FAL than
+ * the one customers get, which would make the comparison worthless -- the
+ * exact failure the 13 Sept log calls out as "a test against un-deployed code
+ * is worthless".
+ */
+export const buildFalGenerationInput = (
+  prompt: string,
+  path: string,
+  seed: number,
+  styleName?: string,
+) => {
+  const isFluxModel = isFluxModelPath(path);
+  const poseReference = isFluxModel ? getPoseReference(styleName) : undefined;
+  const reference = resolveReferenceConfig(poseReference);
+  const endpoint = reference
+    ? "fal-ai/flux-general"
+    : isFluxModel
+      ? "fal-ai/flux-lora"
+      : "fal-ai/qwen-image";
+  const loraScale = resolveLoraScale(isFluxModel);
+  const roleNegativePrompt = getRoleNegativePrompt(styleName);
+  const baseNegativePrompt =
+    "blurry, low resolution, low quality, watermark, logo, unintended text, cropped face, out of frame, distorted face, deformed anatomy, duplicate animal, multiple pets, extra limbs, extra ears, extra eyes, giant eyes, oversized cartoon eyes, extreme chibi, toy-like anatomy, photorealistic candid snapshot, spectators, crowd, unrelated people, couch, blanket, furniture, source photo background, floating object, unsupported prop, intersecting prop, duplicated prop, broken prop, missing uniform";
+  const generationPrompt = reference
+    ? `${prompt} ${reference.guidance}`
+    : prompt;
+
+  // generateIdentityPrompt already checks its own output, but the pose
+  // guidance is appended here — so the string that actually goes to fal is
+  // only measurable at this point.
+  const estimatedPromptTokens = warnIfPromptOverBudget(generationPrompt, {
+    styleName,
+  });
+
+  // One line per generation, carrying everything an A/B arm needs to be
+  // reconstructed: which endpoint ran, whether a reference was used at all
+  // and which one, the reference values in force, the seed, and the prompt
+  // size. `referenceUsed: false` means this generation had no reference
+  // image — either the style has no pool, the pool env var is unset, or
+  // PRINTPETZ_REF_STRENGTH switched it off.
+  // eslint-disable-next-line no-console
+  console.log(
+    "[generation-config]",
+    JSON.stringify({
+      endpoint,
+      styleName: styleName ?? null,
+      seed,
+      estimatedPromptTokens,
+      loraScale,
+      referenceUsed: Boolean(reference),
+      referencePoolConfigured: Boolean(poseReference),
+      referenceImageUrl: reference?.url ?? null,
+      referenceStrength: reference?.strength ?? null,
+      referenceStart: reference?.start ?? null,
+      referenceEnd: reference?.end ?? null,
+    }),
+  );
+
+  return {
+    endpoint,
+    input: {
+      prompt: generationPrompt,
+      seed,
+      loras: [{ path, scale: loraScale }],
+      num_images: 1,
+      num_inference_steps: isFluxModel ? 24 : 32,
+      guidance_scale: isFluxModel ? 4.0 : 2.5,
+      ...(isFluxModel && !reference
+        ? { acceleration: "regular" as const }
+        : {}),
+      ...(reference
+        ? {
+            reference_image_url: reference.url,
+            reference_strength: reference.strength,
+            reference_start: reference.start,
+            reference_end: reference.end,
+          }
+        : {}),
+      output_format: "jpeg",
+      image_size: {
+        width: 820,
+        height: 1024,
+      },
+      negative_prompt: roleNegativePrompt
+        ? `${baseNegativePrompt}, ${roleNegativePrompt}`
+        : baseNegativePrompt,
+    },
+  };
+};
+
 export const handleGenerateImage = async (
   prompt: string,
   path: string,
@@ -132,79 +231,15 @@ export const handleGenerateImage = async (
   styleName?: string,
 ) => {
   try {
-    const isFluxModel = isFluxModelPath(path);
-    const poseReference = isFluxModel ? getPoseReference(styleName) : undefined;
-    const reference = resolveReferenceConfig(poseReference);
-    const endpoint = reference
-      ? "fal-ai/flux-general"
-      : isFluxModel
-        ? "fal-ai/flux-lora"
-        : "fal-ai/qwen-image";
-    const loraScale = resolveLoraScale(isFluxModel);
-    const roleNegativePrompt = getRoleNegativePrompt(styleName);
-    const baseNegativePrompt =
-      "blurry, low resolution, low quality, watermark, logo, unintended text, cropped face, out of frame, distorted face, deformed anatomy, duplicate animal, multiple pets, extra limbs, extra ears, extra eyes, giant eyes, oversized cartoon eyes, extreme chibi, toy-like anatomy, photorealistic candid snapshot, spectators, crowd, unrelated people, couch, blanket, furniture, source photo background, floating object, unsupported prop, intersecting prop, duplicated prop, broken prop, missing uniform";
-    const generationPrompt = reference
-      ? `${prompt} ${reference.guidance}`
-      : prompt;
-
-    // generateIdentityPrompt already checks its own output, but the pose
-    // guidance is appended here — so the string that actually goes to fal is
-    // only measurable at this point.
-    const estimatedPromptTokens = warnIfPromptOverBudget(generationPrompt, {
+    const { endpoint, input } = buildFalGenerationInput(
+      prompt,
+      path,
+      seed,
       styleName,
-    });
-
-    // One line per generation, carrying everything an A/B arm needs to be
-    // reconstructed: which endpoint ran, whether a reference was used at all
-    // and which one, the reference values in force, the seed, and the prompt
-    // size. `referenceUsed: false` means this generation had no reference
-    // image — either the style has no pool, the pool env var is unset, or
-    // PRINTPETZ_REF_STRENGTH switched it off.
-    // eslint-disable-next-line no-console
-    console.log(
-      "[generation-config]",
-      JSON.stringify({
-        endpoint,
-        styleName: styleName ?? null,
-        seed,
-        estimatedPromptTokens,
-        loraScale,
-        referenceUsed: Boolean(reference),
-        referencePoolConfigured: Boolean(poseReference),
-        referenceImageUrl: reference?.url ?? null,
-        referenceStrength: reference?.strength ?? null,
-        referenceStart: reference?.start ?? null,
-        referenceEnd: reference?.end ?? null,
-      }),
     );
 
     const result = await fal.queue.submit(endpoint, {
-      input: {
-        prompt: generationPrompt,
-        seed,
-        loras: [{ path, scale: loraScale }],
-        num_images: 1,
-        num_inference_steps: isFluxModel ? 24 : 32,
-        guidance_scale: isFluxModel ? 4.0 : 2.5,
-        ...(isFluxModel && !reference ? { acceleration: "regular" as const } : {}),
-        ...(reference
-          ? {
-              reference_image_url: reference.url,
-              reference_strength: reference.strength,
-              reference_start: reference.start,
-              reference_end: reference.end,
-            }
-          : {}),
-        output_format: "jpeg",
-        image_size: {
-          width: 820,
-          height: 1024,
-        },
-        negative_prompt: roleNegativePrompt
-          ? `${baseNegativePrompt}, ${roleNegativePrompt}`
-          : baseNegativePrompt,
-      },
+      input,
       webhookUrl: `${AppConstants.serverBaseUrl}/webhook/fal/generation-result`,
     });
 
@@ -217,6 +252,33 @@ export const handleGenerateImage = async (
     });
     throw error;
   }
+};
+
+/**
+ * The same request, awaited instead of queued. Bakeoff only -- production must
+ * stay on the queue so a slow generation never holds a request thread.
+ */
+export const generateFalImageSync = async (
+  prompt: string,
+  path: string,
+  seed: number,
+  styleName?: string,
+) => {
+  const { endpoint, input } = buildFalGenerationInput(
+    prompt,
+    path,
+    seed,
+    styleName,
+  );
+  const startedAt = Date.now();
+
+  const result = await fal.subscribe(endpoint, { input });
+  const images = (result.data as { images?: Array<{ url?: string }> })?.images;
+  const url = images?.[0]?.url;
+
+  if (!url) throw new Error("fal returned no image");
+
+  return { url, latencyMs: Date.now() - startedAt };
 };
 
 export type EditorLook = "natural" | "mascot" | "cartoon";
@@ -254,7 +316,8 @@ export const handleEditImageLook = async (
       },
     });
 
-    const images = (result.data as { images?: Array<{ url?: string }> })?.images;
+    const images = (result.data as { images?: Array<{ url?: string }> })
+      ?.images;
     const editedUrl = images?.[0]?.url;
     if (!editedUrl) {
       throw new Error("Image editor did not return an image");
