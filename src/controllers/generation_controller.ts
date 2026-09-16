@@ -300,7 +300,9 @@ const createImage = AsyncHandler.handle(async (req, res) => {
             request_id: result.requestId,
             status: EGenerationStatus.GENERATING,
           });
-          return { billable: true, generation };
+          // No row means nothing in History and nothing for the webhook to
+          // finish, so nothing to charge for.
+          return { billable: generation !== null, generation };
         }
 
         const imageUrl = await uploadGenerationImageBuffer(
@@ -325,7 +327,10 @@ const createImage = AsyncHandler.handle(async (req, res) => {
           status: EGenerationStatus.COMPLETED,
           image: imageUrl,
         });
-        return { billable: true, generation };
+        // The image is in S3, but a customer who cannot see it in History has
+        // not received it. The failed insert is in error_logs with its URL, so
+        // it can still be recovered by hand.
+        return { billable: generation !== null, generation };
       } catch (error) {
         // A failure the customer did not get an image from is a failure the
         // customer does not pay for -- the same rule as any other AI failure.

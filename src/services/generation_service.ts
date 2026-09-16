@@ -32,8 +32,25 @@ import { addErrorLog } from "./error_logs_service";
 import { getFileBufferFromUrl } from "./file_service";
 import { updateUserCredit } from "./user_service";
 
-export const addGeneration = async (input: Partial<IGeneration>) => {
-  const { data, error } = await retrySupabase<IGeneration>(
+// provider and provider_model are labels, added by
+// add-generations-provider-columns.sql. If PRINTPETZ_PROVIDER_COLUMNS is on
+// before that SQL has run, PostgREST rejects the whole insert with PGRST204 --
+// which on 16 Sept lost 24 images, 22 of them already made and paid for. A
+// missing label is not worth a missing image, so drop the labels and insert
+// again rather than fail.
+const LABEL_COLUMNS = ["provider", "provider_model"];
+
+export const withoutLabelColumns = <T extends object>(input: T): T => {
+  if (!LABEL_COLUMNS.some((column) => column in input)) {
+    return input;
+  }
+  const unlabelled = { ...input };
+  LABEL_COLUMNS.forEach((column) => delete unlabelled[column]);
+  return unlabelled;
+};
+
+const insertGeneration = (input: Partial<IGeneration>) =>
+  retrySupabase<IGeneration>(
     async () =>
       await supabase
         .from(tables.generations)
@@ -41,6 +58,20 @@ export const addGeneration = async (input: Partial<IGeneration>) => {
         .select("*")
         .single(),
   );
+
+export const addGeneration = async (input: Partial<IGeneration>) => {
+  let { data, error } = await insertGeneration(input);
+
+  const unlabelled = withoutLabelColumns(input);
+  if (error?.code === "PGRST204" && unlabelled !== input) {
+    addErrorLog({
+      error: JSON.stringify(error),
+      input: JSON.stringify(input),
+      type: "ADD_GENERATION_LABEL_COLUMNS",
+    });
+    ({ data, error } = await insertGeneration(unlabelled));
+    input = unlabelled;
+  }
 
   if (error) {
     addErrorLog({
