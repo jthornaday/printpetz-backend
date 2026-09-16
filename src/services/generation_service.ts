@@ -5,6 +5,24 @@ import { retrySupabase } from "@/context/retry";
 import supabase from "@/supabase/create_client";
 import { tables } from "@/supabase/tables";
 import { EUploadPath } from "@/types/aws";
+
+/** Marks a generations row as claimed by the in-process worker. */
+export const CLAIM_PREFIX = "queued:";
+
+// generations.provider and provider_model arrive in
+// add-generations-provider-columns.sql, which Jake runs by hand. Supabase
+// rejects an insert naming a column that does not exist, so writing them
+// unconditionally would fail EVERY generation on any deploy that reached
+// production before the SQL did. The flag makes that ordering impossible to
+// get wrong. Off by default; set PRINTPETZ_PROVIDER_COLUMNS=true once the
+// columns exist.
+const providerColumnsEnabled = () =>
+  /^(1|true|yes)$/i.test(process.env.PRINTPETZ_PROVIDER_COLUMNS?.trim() ?? "");
+
+export const providerColumns = (provider: string, providerModel?: string) =>
+  providerColumnsEnabled()
+    ? { provider, ...(providerModel ? { provider_model: providerModel } : {}) }
+    : {};
 import { TFalImageGenerationResponse } from "@/types/fal";
 import { EGenerationStatus, IGeneration } from "@/types/generation";
 import errorResponse from "@/utils/errors/errorResponse";
@@ -146,6 +164,97 @@ export const uploadGenerationImageBuffer = async (
     fileType: contentType,
     Key: `${EUploadPath.GENERATION_IMAGE.replace("[USER_ID]", userId)}/${fileName}`,
   });
+};
+
+/**
+ * Claim one queued generation for this worker, atomically.
+ *
+ * Queued rows are inserted with request_id null. Setting it is the claim, and
+ * the `is("request_id", null)` predicate makes that conditional: two workers
+ * racing for the same row, or a worker racing its own restart, produce exactly
+ * one winner and one empty result. No advisory lock, no extra column.
+ *
+ * FAL rows always carry a request_id from the moment they are inserted, so
+ * "request_id is null" is precisely the set of rows nobody has started.
+ */
+export const claimQueuedGeneration = async (claimToken: string) => {
+  const { data: candidates } = await retrySupabase<IGeneration[]>(
+    async () =>
+      await supabase
+        .from(tables.generations)
+        .select("*")
+        .eq("status", EGenerationStatus.GENERATING)
+        .is("request_id", null)
+        .is("image", null)
+        .order("id")
+        .limit(1),
+  );
+
+  const candidate = (candidates as unknown as IGeneration[])?.[0];
+  if (!candidate) return null;
+
+  const { data } = await retrySupabase<IGeneration>(
+    async () =>
+      await supabase
+        .from(tables.generations)
+        .update({ request_id: claimToken })
+        .eq("id", candidate.id)
+        .is("request_id", null)
+        .select("*")
+        .single(),
+  );
+
+  return (data as IGeneration) ?? null;
+};
+
+/**
+ * Rows that were claimed or queued and never finished -- a process killed
+ * mid-batch, a deploy, an EB restart. Age is read from group_id, which is
+ * Date.now() at batch creation, so this needs no timestamp column.
+ */
+export const findStrandedGenerations = async (olderThanMs: number) => {
+  const cutoff = Date.now() - olderThanMs;
+
+  const { data } = await retrySupabase<IGeneration[]>(
+    async () =>
+      await supabase
+        .from(tables.generations)
+        .select("*")
+        .eq("status", EGenerationStatus.GENERATING)
+        .is("image", null)
+        .lt("group_id", cutoff),
+  );
+
+  // FAL rows are finished by their webhook and must not be swept out from
+  // under it. Only rows this worker owns -- queued (null) or claimed -- qualify.
+  return ((data as unknown as IGeneration[]) ?? []).filter(
+    (row) => row.request_id === null || row.request_id.startsWith(CLAIM_PREFIX),
+  );
+};
+
+/**
+ * Unfinished QUEUED work for one user, for the double-submission guard.
+ *
+ * Deliberately not "all unfinished work". A FAL row waits on a webhook that
+ * may never arrive, and counting those would let one stranded row from months
+ * ago lock a customer out of generating forever. Only rows this worker owns --
+ * queued (null request_id) or claimed -- can block a new batch, and the sweep
+ * clears those within its threshold no matter what happens to the process.
+ */
+export const countUnfinishedGenerations = async (userId: string) => {
+  const { data } = await retrySupabase<IGeneration[]>(
+    async () =>
+      await supabase
+        .from(tables.generations)
+        .select("*")
+        .eq("user_id", userId)
+        .eq("status", EGenerationStatus.GENERATING)
+        .is("image", null),
+  );
+
+  return ((data as unknown as IGeneration[]) ?? []).filter(
+    (row) => row.request_id === null || row.request_id.startsWith(CLAIM_PREFIX),
+  ).length;
 };
 
 const handleImageUploadAndSave = async (
