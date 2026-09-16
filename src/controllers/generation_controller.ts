@@ -7,7 +7,9 @@ import {
 } from "@/services/fal_service";
 import {
   addGeneration,
+  countUnfinishedGenerations,
   getGenerationById,
+  providerColumns,
   uploadGenerationImageBuffer,
 } from "@/services/generation_service";
 import { getImageProvider } from "@/services/providers";
@@ -144,21 +146,6 @@ const getGenerationSubject = (
   return `${subjectWithStop} ${variant[0].toUpperCase()}${variant.slice(1)}`;
 };
 
-// generations.provider and generations.provider_model arrive in
-// add-generations-provider-columns.sql, which Jake runs by hand. Supabase
-// rejects an insert naming a column that does not exist, so writing them
-// unconditionally would fail EVERY generation on any deploy that reached
-// production before the SQL did -- not just the OpenAI ones.
-//
-// The flag makes that ordering impossible to get wrong instead of merely
-// documenting it. Off by default; set PRINTPETZ_PROVIDER_COLUMNS=true once the
-// columns exist.
-const providerColumnsEnabled = () =>
-  /^(1|true|yes)$/i.test(process.env.PRINTPETZ_PROVIDER_COLUMNS?.trim() ?? "");
-
-const providerColumns = (provider: string, providerModel: string) =>
-  providerColumnsEnabled() ? { provider, provider_model: providerModel } : {};
-
 const createImage = AsyncHandler.handle(async (req, res) => {
   const user = req.user;
   const { numberOfImages, styleId, modelId, cutenessLevel, seed } =
@@ -204,25 +191,85 @@ const createImage = AsyncHandler.handle(async (req, res) => {
   const group_id = Date.now();
   const variantOffset = getVariantOffset(group_id);
 
+  // Two shapes, because the providers are two shapes.
+  //
+  // FAL is queued: submitting returns a request id in milliseconds and a
+  // webhook finishes the row, so submitting inline costs nothing.
+  //
+  // OpenAI is synchronous and took 21-84 seconds per image in the bakeoff. The
+  // first live batch on 16 Sept ran four of those concurrently against a
+  // tier-1 limit of five images a minute, held the HTTP connection for
+  // minutes, and charged for images the customer never saw -- Node does not
+  // abort a handler when the client hangs up, and the frontend only refetches
+  // after the request resolves. So the OpenAI lane inserts the rows and
+  // returns; generation_worker drains them, paced.
+  const isQueuedLane = lane === "reference";
+
+  const buildPrompt = (imageIndex: number) => {
+    const subject = getGenerationSubject(
+      style.base_prompt,
+      style.name,
+      triggerWord,
+      imageIndex,
+      style.variants,
+      variantOffset,
+      petName,
+    );
+    return generateIdentityPrompt(
+      subject,
+      cutenessLevel,
+      petName,
+      style.name,
+      petDescription,
+      lane,
+    );
+  };
+
+  if (isQueuedLane) {
+    // One unfinished batch at a time. The Create page resets its image count
+    // to the default of 2 on refresh, so refresh-and-retry during a slow batch
+    // is a realistic path to paying twice -- which is what turned a four-image
+    // request into a twelve-credit charge on 16 Sept.
+    const unfinished = await countUnfinishedGenerations(user.id);
+    if (unfinished > 0) {
+      throw errorResponse.Api400Error({
+        errorDescription: `You already have ${unfinished} image${unfinished === 1 ? "" : "s"} being generated. They'll appear here shortly — no need to start another batch.`,
+      });
+    }
+
+    const generations = await Promise.all(
+      Array.from({ length: numberOfImages }).map(async (_, imageIndex) =>
+        addGeneration({
+          group_id,
+          model_id: modelId,
+          style_id: styleId,
+          user_id: user.id,
+          prompt: buildPrompt(imageIndex),
+          seed: getImageSeed(baseSeed, imageIndex),
+          // provider_model is unknown until the worker runs, and it fills it in.
+          ...providerColumns(provider.name),
+          // Inserted as GENERATING, not PENDING: the frontend already polls
+          // GENERATING for the FAL lane, and PENDING is a status the deployed
+          // frontend does not recognise. request_id stays null -- that null is
+          // what the worker claims against, atomically.
+          status: EGenerationStatus.GENERATING,
+          request_id: null,
+        }),
+      ),
+    );
+
+    // Charged up front and refunded on failure, exactly as the FAL lane
+    // already does from its webhook. One billing model, one refund path, and
+    // no way to queue work you cannot afford.
+    await updateUserCredit(user.id, generationCharge, false);
+
+    res.dataCreateSuccess({ data: { generations } });
+    return;
+  }
+
   const results = await Promise.all(
     Array.from({ length: numberOfImages }).map(async (_, imageIndex) => {
-      const subject = getGenerationSubject(
-        style.base_prompt,
-        style.name,
-        triggerWord,
-        imageIndex,
-        style.variants,
-        variantOffset,
-        petName,
-      );
-      const prompt = generateIdentityPrompt(
-        subject,
-        cutenessLevel,
-        petName,
-        style.name,
-        petDescription,
-        lane,
-      );
+      const prompt = buildPrompt(imageIndex);
       const imageSeed = getImageSeed(baseSeed, imageIndex);
 
       const common = {
@@ -233,7 +280,6 @@ const createImage = AsyncHandler.handle(async (req, res) => {
         prompt,
         seed: imageSeed,
       };
-
       try {
         const result = await provider.generate({
           prompt,
