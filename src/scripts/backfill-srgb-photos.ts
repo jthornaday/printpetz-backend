@@ -8,6 +8,8 @@
  *   npm run build
  *   node -r module-alias/register lib/scripts/backfill-srgb-photos.js            # dry run
  *   node -r module-alias/register lib/scripts/backfill-srgb-photos.js --confirm  # writes to S3
+ *   node -r module-alias/register lib/scripts/backfill-srgb-photos.js --fix-orientation
+ *                                                     # second pass: bake EXIF orientation, same keys
  *
  * It NEVER writes to the database and NEVER overwrites or deletes an original
  * S3 object. Converted photos go to new keys; the SQL that repoints
@@ -273,8 +275,194 @@ const planForModel = async (
 // Main
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Orientation repair
+// ---------------------------------------------------------------------------
+
+/**
+ * A targeted second pass for photos already converted and already pointed at
+ * by the database.
+ *
+ * The normal path cannot touch these. classify() calls them acceptable -- they
+ * ARE valid sRGB JPEGs -- so planForModel skips them and the script correctly
+ * reports nothing to do. What it cannot see is EXIF orientation: sips converted
+ * the colour but left orientation=6 on four of the six HEIC conversions, so
+ * those files are upright only for a reader that honours the tag.
+ *
+ * Keys do not change here, so there is no SQL and no database write: the rows
+ * already point exactly where these objects live. That also means CloudFront
+ * will keep serving the old bytes until the paths are invalidated, which is the
+ * step that actually makes this visible.
+ */
+
+// Extensions the originals could have, most likely first. Probed rather than
+// assumed because the six HEIC files are a mix of .HEIC and .heic and Max's
+// are .jpeg.
+const ORIGINAL_EXTENSIONS = [
+  ".HEIC",
+  ".heic",
+  ".jpeg",
+  ".jpg",
+  ".png",
+  ".JPG",
+  ".JPEG",
+];
+
+const findOriginalFor = async (srgbUrl: string) => {
+  const stem = srgbUrl.replace(/-srgb\.jpg$/, "");
+  if (stem === srgbUrl) return null;
+
+  for (const ext of ORIGINAL_EXTENSIONS) {
+    const candidate = `${stem}${ext}`;
+    const response = await fetch(candidate, { method: "HEAD" });
+    if (response.ok) return candidate;
+  }
+  return null;
+};
+
+const orientationOf = async (bytes: Buffer) => {
+  try {
+    return (await sharp(bytes).metadata()).orientation ?? null;
+  } catch {
+    return null;
+  }
+};
+
+const fixOrientation = async () => {
+  const { data, error } = await supabase
+    .from(tables.models)
+    .select("*")
+    .in(
+      "id",
+      TARGETS.filter((t) => t.mode === "convert").map((t) => t.modelId),
+    )
+    .order("id");
+
+  if (error) throw new Error(`Could not read models: ${error.message}`);
+  const models = (data ?? []) as IModel[];
+
+  console.log("\n=== ORIENTATION REPAIR ===");
+  console.log(
+    confirmed
+      ? "  Re-uploading to the SAME keys. No database change, no SQL.\n"
+      : "  Dry run. Nothing is written.\n",
+  );
+
+  let needed = 0;
+  let fixed = 0;
+
+  for (const model of models) {
+    const target = TARGETS.find((t) => t.modelId === model.id);
+    console.log(`${target?.petName ?? model.name} (model ${model.id})`);
+
+    for (const url of model.training_images ?? []) {
+      const response = await fetch(url);
+      if (!response.ok) {
+        console.log(
+          `  HTTP ${response.status}  ${path.basename(keyFromUrl(url))}`,
+        );
+        continue;
+      }
+
+      const bytes = Buffer.from(await response.arrayBuffer());
+      const before = await orientationOf(bytes);
+      const name = path.basename(keyFromUrl(url));
+
+      // orientation 1 is upright; absent means no tag to honour or ignore.
+      // Either way there is nothing for a reader to get wrong.
+      if (before === null || before === 1) {
+        console.log(`  ok    orientation=${before ?? "none"}  ${name}`);
+        continue;
+      }
+
+      needed += 1;
+
+      // Prefer redoing the conversion from the original: rotating the existing
+      // JPEG would put it through a second lossy encode for no reason. The
+      // originals were never overwritten, so they are still there.
+      const original = await findOriginalFor(url);
+      let repaired: Buffer;
+      let source: string;
+
+      if (original) {
+        const originalBytes = Buffer.from(
+          await (await fetch(original)).arrayBuffer(),
+        );
+        const format = sniffFormat(originalBytes);
+        repaired =
+          format === "image/heic"
+            ? await convertHeicWithSips(
+                originalBytes,
+                path.basename(keyFromUrl(original)),
+              )
+            : (
+                await convertToSrgbJpeg(
+                  originalBytes,
+                  path.basename(keyFromUrl(original)),
+                )
+              ).buffer;
+        source = `re-converted from ${path.basename(keyFromUrl(original))}`;
+      } else {
+        repaired = await sharp(bytes)
+          .rotate()
+          .jpeg({ quality: Number(SIPS_QUALITY) })
+          .toBuffer();
+        source = "rotated in place (original not found)";
+      }
+
+      const after = await orientationOf(repaired);
+      console.log(
+        `  FIX   orientation=${before} -> ${after ?? "none"}  ${name}`,
+      );
+      console.log(
+        `          ${source}, ${(bytes.length / 1024).toFixed(0)}kB -> ${(repaired.length / 1024).toFixed(0)}kB`,
+      );
+
+      if (!confirmed) continue;
+
+      const uploaded = await uploadFileToS3({
+        buffer: repaired,
+        fileType: "image/jpeg",
+        Key: keyFromUrl(url),
+      });
+
+      if (!uploaded) {
+        console.log("          UPLOAD FAILED");
+        continue;
+      }
+      fixed += 1;
+      console.log("          re-uploaded to the same key");
+    }
+    console.log("");
+  }
+
+  if (!confirmed) {
+    console.log(
+      `Dry run: ${needed} photo(s) need orientation baked in. Nothing written.`,
+    );
+    console.log("Re-run with --confirm to re-upload them.\n");
+    return;
+  }
+
+  console.log(`${fixed} of ${needed} photo(s) re-uploaded.\n`);
+  console.log("NOW INVALIDATE CLOUDFRONT, or none of this is visible:");
+  console.log(
+    "  the keys are unchanged, so the CDN keeps serving the old bytes.",
+  );
+  console.log(
+    "  Console -> CloudFront -> the d155jdfit5sgy distribution -> Invalidations",
+  );
+  console.log("  Path: /training-images/*\n");
+};
+
 const main = async () => {
   console.log("PrintPetz sRGB backfill");
+
+  if (process.argv.includes("--fix-orientation")) {
+    await fixOrientation();
+    return;
+  }
+
   console.log(
     confirmed
       ? "  MODE: --confirm, will write new objects to S3\n"
