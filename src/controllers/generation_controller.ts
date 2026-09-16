@@ -261,7 +261,24 @@ const createImage = AsyncHandler.handle(async (req, res) => {
     // Charged up front and refunded on failure, exactly as the FAL lane
     // already does from its webhook. One billing model, one refund path, and
     // no way to queue work you cannot afford.
-    await updateUserCredit(user.id, generationCharge, false);
+    //
+    // Only saved rows are charged. A row that failed to insert is nothing the
+    // worker will run and nothing History will show -- on 16 Sept that was a
+    // whole evening of paid-for images.
+    const savedCount = generations.filter(
+      (generation) => generation !== null,
+    ).length;
+    if (savedCount === 0) {
+      throw errorResponse.Api500Error({
+        errorDescription:
+          "We couldn't start your images and you haven't been charged. Please try again.",
+      });
+    }
+    await updateUserCredit(
+      user.id,
+      AppConstants.imageGenerationCredit * savedCount,
+      false,
+    );
 
     res.dataCreateSuccess({ data: { generations } });
     return;
@@ -300,7 +317,9 @@ const createImage = AsyncHandler.handle(async (req, res) => {
             request_id: result.requestId,
             status: EGenerationStatus.GENERATING,
           });
-          return { billable: true, generation };
+          // No row means nothing in History and nothing for the webhook to
+          // finish, so nothing to charge for.
+          return { billable: generation !== null, generation };
         }
 
         const imageUrl = await uploadGenerationImageBuffer(
@@ -325,7 +344,10 @@ const createImage = AsyncHandler.handle(async (req, res) => {
           status: EGenerationStatus.COMPLETED,
           image: imageUrl,
         });
-        return { billable: true, generation };
+        // The image is in S3, but a customer who cannot see it in History has
+        // not received it. The failed insert is in error_logs with its URL, so
+        // it can still be recovered by hand.
+        return { billable: generation !== null, generation };
       } catch (error) {
         // A failure the customer did not get an image from is a failure the
         // customer does not pay for -- the same rule as any other AI failure.
