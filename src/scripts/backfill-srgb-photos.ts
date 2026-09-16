@@ -43,6 +43,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import sharp from "sharp";
+
 import AppConstants from "@/constants/app_constants";
 import { uploadFileToS3 } from "@/services/aws_service";
 import supabase from "@/supabase/create_client";
@@ -129,7 +131,10 @@ const sqlTextArray = (values: string[]) =>
  * whole point of the upload-time fix. Here we are repairing files that already
  * exist, on a Mac, where ColorSync can do what sharp cannot.
  */
-const convertHeicWithSips = (bytes: Buffer, filename: string): Buffer => {
+const convertHeicWithSips = async (
+  bytes: Buffer,
+  filename: string,
+): Promise<Buffer> => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "printpetz-heic-"));
   const input = path.join(dir, filename.replace(/[^\w.-]/g, "_"));
   const output = path.join(dir, "out.jpg");
@@ -153,7 +158,19 @@ const convertHeicWithSips = (bytes: Buffer, filename: string): Buffer => {
       ],
       { stdio: "pipe" },
     );
-    return fs.readFileSync(output);
+
+    // sips leaves the EXIF orientation tag in place rather than applying it, so
+    // four of these six files come out with orientation=6 -- upright only if
+    // whatever reads them honours the tag. convertToSrgbJpeg bakes orientation
+    // into the pixels via .rotate(), so Max's photos are upright regardless.
+    // Matching that here removes an asymmetry between pets in the very
+    // comparison this backfill exists to make fair: a sideways reference would
+    // degrade identity without failing any check here, and would be near
+    // impossible to attribute afterwards.
+    return sharp(fs.readFileSync(output))
+      .rotate()
+      .jpeg({ quality: Number(SIPS_QUALITY) })
+      .toBuffer();
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -229,7 +246,7 @@ const planForModel = async (
 
     let converted: Buffer;
     if (format === "image/heic") {
-      converted = convertHeicWithSips(bytes, filename);
+      converted = await convertHeicWithSips(bytes, filename);
     } else {
       // The same call the upload path makes, so a backfilled photo and a newly
       // uploaded one go through identical code.
