@@ -33,17 +33,9 @@ const uploadFile = AsyncHandler.handle(async (req, res) => {
   if (normaliseColour) {
     for (const file of files) {
       const format = sniffFormat(file.buffer);
-      if (format === "image/heic") {
+      if (!["image/png", "image/jpeg", "image/webp", "image/heic"].includes(format)) {
         throw errorResponse.Api400Error({
-          errorDescription:
-            `"${file.originalname}" is in Apple's HEIC format, which we can't read. ` +
-            "On iPhone, go to Settings > Camera > Formats and choose Most " +
-            "Compatible, then re-take or re-export the photo as a JPEG.",
-        });
-      }
-      if (!["image/png", "image/jpeg", "image/webp"].includes(format)) {
-        throw errorResponse.Api400Error({
-          errorDescription: `"${file.originalname}" isn't a JPEG, PNG or WebP image. Please upload one of those.`,
+          errorDescription: `"${file.originalname}" isn't a JPEG, PNG, WebP or HEIC image. Please upload one of those.`,
         });
       }
     }
