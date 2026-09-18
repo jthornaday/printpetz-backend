@@ -3,12 +3,12 @@
 > **Superseded in part (HEIC).** HEIC uploads are no longer refused: `convertToSrgbJpeg` decodes them with `heic-convert` in a worker thread and returns an sRGB JPEG, keeping the photo's own ICC profile. The HEIC-rejection checklist item, the "Server-side HEIC decoding" non-goal and the reject-the-batch-on-HEIC rule below describe the earlier behaviour. See `src/utils/image_conversion.ts`.
 
 ## Goal
-Every training photo that reaches S3 from now on is an sRGB JPEG, and HEIC uploads are refused with a message the customer can act on.
+Every training photo that reaches S3 from now on is an sRGB JPEG or is already-clean original bytes. HEIC uploads are decoded to sRGB JPEG; an HEIC that can't be decoded is stored untouched, and anything that isn't a supported format is refused with a message the customer can act on.
 
 ## Done when
 - [ ] Uploading a Display P3 JPEG to `POST /file/upload?type=TRAINING_IMAGE` stores an sRGB JPEG. Verified by running `--audit-color` afterwards and seeing that model's photo counted under sRGB, not non-sRGB.
 - [ ] Uploading a photo that is already sRGB, or has no embedded profile, stores the **original bytes unchanged** — no re-encode, no quality loss. Byte length in S3 matches the uploaded file.
-- [ ] Uploading a `.HEIC` file returns HTTP 400 whose message names the offending filename and tells the user to switch to Most Compatible on iPhone. Nothing is written to S3 for that request.
+- [ ] Uploading a valid `.HEIC` file stores an sRGB JPEG (key ends `.jpg`, Content-Type `image/jpeg`). An HEIC that can't be decoded is stored as its original bytes (logged as `[heic-decode-failed]`), never rejected. A GIF/PDF/other unsupported format returns HTTP 400 whose message names the offending filename, and nothing is written to S3 for that request.
 - [ ] Uploading to any other type (`PROFILE_IMAGE`, `GENERATION_IMAGE`, `MODEL`) behaves exactly as it does today.
 - [ ] `npm run build` is clean and `npx tsc --noEmit` reports no new errors.
 - [ ] `sharp` appears in `dependencies` in `package.json` and `package-lock.json`, and `npm ci` from a clean checkout installs it.
@@ -38,7 +38,6 @@ Every training photo that reaches S3 from now on is an sRGB JPEG, and HEIC uploa
 Anything else asks first.
 
 ## Out of scope
-- Server-side HEIC decoding. sharp's prebuilt binary parses the container but cannot decode the pixels (`Decoder plugin generated an error`), and that will be identical on EB Linux. Rejecting is the decision.
 - Client-side HEIC conversion in the frontend.
 - Backfilling existing photos — that is [srgb-photo-backfill](srgb-photo-backfill.md).
 - Resizing or recompressing photos that are already fine.
@@ -46,12 +45,12 @@ Anything else asks first.
 ## Approach (suggested, not mandatory)
 - Move the ICC/format helpers out of `provider-bakeoff.ts` into `src/utils/image_conversion.ts` and import them back, so there is one implementation.
 - Export `convertToSrgbJpeg(buffer): Promise<{ buffer, contentType, converted, reason }>` from that module. It decides from the **bytes**, never from `file.mimetype`:
-  - HEIC → throw a typed error carrying the filename.
-  - Not PNG/JPEG/WebP → throw the same typed error.
+  - HEIC → decode with `heic-convert` (worker thread), keep the photo's own ICC profile, convert to an sRGB JPEG, return `converted: true`. Undecodable → log and return the original bytes as `image/heic`, `converted: false` (see specs/heic-decode-diagnostics.md).
+  - Not PNG/JPEG/WebP/HEIC → throw the same typed error.
   - Explicit non-sRGB ICC → convert, return `converted: true`.
   - sRGB or no profile → return the input untouched, `converted: false`.
 - In `file_controller`, apply it only when `type === "TRAINING_IMAGE"`. Set the S3 `fileType` from the sniffed format, not from `file.mimetype`, so a mislabelled upload can never poison the object again.
-- Reject the whole request if any file in the batch is HEIC, rather than silently uploading 4 of 5 — a half-uploaded training set is worse than a clear error.
+- Reject the whole request if any file in the batch is an unsupported format, rather than silently uploading 4 of 5 — a half-uploaded training set is worse than a clear error.
 - Log one line per converted file with the profile name it replaced, so the rate of this in the wild becomes visible.
 
 **Sharpest risk:** sharp is a native binary. If EB's build does not produce a linux-x64 binary, training uploads fail in production while working locally. Before merging, confirm the EB deploy log shows sharp installing, and upload one photo through the deployed environment rather than trusting the local test.

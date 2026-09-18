@@ -291,19 +291,26 @@ const embedPngProfile = (png: Buffer, icc: Buffer): Buffer => {
  * libheif applies the container's rotation/mirror itself, so orientation is
  * already baked into the pixels.
  */
-const decodeHeic = async (buffer: Buffer, filename: string): Promise<Buffer> => {
-  try {
-    const { icc } = await sharp(buffer).metadata();
-    const png = await decodeHeicToPng(buffer);
-    return icc ? embedPngProfile(png, icc) : png;
-  } catch {
-    throw new UnsupportedImageError(
-      filename,
-      "image/heic",
-      `"${filename}" looks damaged or is a HEIC variant we can't read. Please ` +
-        "re-export it as a JPEG and try again.",
-    );
-  }
+const decodeHeic = async (buffer: Buffer): Promise<Buffer> => {
+  const { icc } = await sharp(buffer).metadata();
+  const png = await decodeHeicToPng(buffer);
+  return icc ? embedPngProfile(png, icc) : png;
+};
+
+/** Record why a HEIC could not be converted. The upload still succeeds with the
+ * original bytes, so this line is the only trace that it happened. */
+const logHeicFallback = (buffer: Buffer, filename: string, error: unknown) => {
+  // eslint-disable-next-line no-console
+  console.error(
+    "[heic-decode-failed]",
+    JSON.stringify({
+      file: filename,
+      bytes: buffer.length,
+      errorType: (error as Error)?.constructor?.name,
+      message: (error as Error)?.message ?? String(error),
+      brand: buffer.toString("latin1", 8, 12),
+    }),
+  );
 };
 
 /**
@@ -313,8 +320,11 @@ const decodeHeic = async (buffer: Buffer, filename: string): Promise<Buffer> => 
  * untouched when it is already acceptable -- re-encoding a clean JPEG would
  * cost quality for nothing.
  *
- * HEIC is decoded and always comes back as an sRGB JPEG. Throws
- * UnsupportedImageError for anything that is not an image we can handle.
+ * HEIC is decoded and comes back as an sRGB JPEG. libheif does not read every
+ * HEIC variant Apple produces, and HEIC was stored untouched before decoding
+ * existed, so a HEIC that fails at any step is returned as its original bytes
+ * (logged) rather than blocking the upload. Throws UnsupportedImageError only
+ * for input that is not an image we accept at all.
  */
 export const convertToSrgbJpeg = async (
   buffer: Buffer,
@@ -331,24 +341,33 @@ export const convertToSrgbJpeg = async (
     );
   }
 
-  const input = isHeic ? await decodeHeic(buffer, filename) : buffer;
+  const toSrgbJpeg = async (input: Buffer): Promise<ConversionResult> => {
+    const profile = readColorProfile(input);
+    if (!isHeic && isSrgb(profile)) {
+      return { buffer, contentType: format, converted: false, replacedProfile: null };
+    }
 
-  const profile = readColorProfile(input);
-  if (!isHeic && isSrgb(profile)) {
-    return { buffer, contentType: format, converted: false, replacedProfile: null };
-  }
+    const converted = await sharp(input)
+      .rotate()
+      .toColorspace("srgb")
+      .withMetadata({ icc: "srgb" })
+      .jpeg({ quality: JPEG_QUALITY })
+      .toBuffer();
 
-  const converted = await sharp(input)
-    .rotate()
-    .toColorspace("srgb")
-    .withMetadata({ icc: "srgb" })
-    .jpeg({ quality: JPEG_QUALITY })
-    .toBuffer();
-
-  return {
-    buffer: converted,
-    contentType: "image/jpeg",
-    converted: true,
-    replacedProfile: profile,
+    return {
+      buffer: converted,
+      contentType: "image/jpeg",
+      converted: true,
+      replacedProfile: profile,
+    };
   };
+
+  if (!isHeic) return toSrgbJpeg(buffer);
+
+  try {
+    return await toSrgbJpeg(await decodeHeic(buffer));
+  } catch (error) {
+    logHeicFallback(buffer, filename, error);
+    return { buffer, contentType: "image/heic", converted: false, replacedProfile: null };
+  }
 };
