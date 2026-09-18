@@ -1,3 +1,4 @@
+import { Worker } from "node:worker_threads";
 import zlib from "node:zlib";
 
 import sharp from "sharp";
@@ -202,6 +203,109 @@ export type ConversionResult = {
   replacedProfile: string | null;
 };
 
+// heic-convert is WASM and CPU-bound: a 12MP iPhone photo takes ~4s, all of it
+// on whatever thread calls it. On the main thread that freezes every other
+// request (health checks included) for the duration, so it runs in a worker.
+// Inline source, so it needs no separate file in the tsc build; the module is
+// passed by absolute path because an eval'd worker does not resolve relative
+// to this file.
+const HEIC_WORKER_SOURCE = `
+const { parentPort, workerData } = require("node:worker_threads");
+require(workerData.modulePath)({ buffer: workerData.buffer, format: "PNG" }).then((out) => {
+  const bytes = new Uint8Array(out).slice();
+  parentPort.postMessage(bytes, [bytes.buffer]);
+});
+`;
+
+// Each decode holds tens of MB of pixels plus the WASM heap, so cap how many
+// run at once. The slot is handed straight to the next waiter on release so
+// the cap cannot be overshot by a caller arriving in between.
+const MAX_CONCURRENT_HEIC_DECODES = 2;
+let activeDecodes = 0;
+const waitingDecodes: Array<() => void> = [];
+
+const withDecodeSlot = async <T>(work: () => Promise<T>): Promise<T> => {
+  if (activeDecodes < MAX_CONCURRENT_HEIC_DECODES) {
+    activeDecodes += 1;
+  } else {
+    await new Promise<void>((resolve) => waitingDecodes.push(resolve));
+  }
+  try {
+    return await work();
+  } finally {
+    const next = waitingDecodes.shift();
+    if (next) next();
+    else activeDecodes -= 1;
+  }
+};
+
+const decodeHeicToPng = (buffer: Buffer): Promise<Buffer> =>
+  withDecodeSlot(
+    () =>
+      new Promise<Buffer>((resolve, reject) => {
+        const worker = new Worker(HEIC_WORKER_SOURCE, {
+          eval: true,
+          workerData: { modulePath: require.resolve("heic-convert"), buffer },
+        });
+        worker.once("message", (bytes: Uint8Array) =>
+          resolve(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.length)),
+        );
+        worker.once("error", reject);
+        worker.once("exit", (code) => reject(new Error(`HEIC worker exited with ${code}`)));
+      }),
+  );
+
+/** Insert an iCCP chunk straight after IHDR, so the profile travels with the
+ * pixels. sharp cannot take a raw ICC buffer as an input profile, and its
+ * built-in "p3" is not a substitute: measured against macOS ColorSync it left
+ * the pixels essentially unconverted, where the photo's own profile converts
+ * correctly. */
+const embedPngProfile = (png: Buffer, icc: Buffer): Buffer => {
+  const ihdrEnd = 8 + 4 + 4 + 13 + 4; // signature + IHDR (length, type, data, crc)
+  const body = Buffer.concat([Buffer.from("icc\0\0", "latin1"), zlib.deflateSync(icc)]);
+  const typeAndBody = Buffer.concat([Buffer.from("iCCP", "latin1"), body]);
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(body.length);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(zlib.crc32(typeAndBody));
+  return Buffer.concat([
+    png.subarray(0, ihdrEnd),
+    length,
+    typeAndBody,
+    crc,
+    png.subarray(ihdrEnd),
+  ]);
+};
+
+/**
+ * Decode HEIC to a lossless PNG, keeping the colour profile.
+ *
+ * sharp's prebuilt libvips has no HEVC decoder (`format.heif` is AVIF-only), so
+ * the pixels come from heic-convert's WASM libheif instead. That drops the
+ * container's ICC profile, and an iPhone HEIC is nearly always Display P3 -- so
+ * the profile is read back with sharp (which can parse the container) and
+ * re-attached, which lets the shared path below convert to sRGB properly
+ * instead of leaving P3 values that every decoder would read as sRGB.
+ *
+ * PNG rather than JPEG so the photo is only lossy-encoded once, at the end.
+ * libheif applies the container's rotation/mirror itself, so orientation is
+ * already baked into the pixels.
+ */
+const decodeHeic = async (buffer: Buffer, filename: string): Promise<Buffer> => {
+  try {
+    const { icc } = await sharp(buffer).metadata();
+    const png = await decodeHeicToPng(buffer);
+    return icc ? embedPngProfile(png, icc) : png;
+  } catch {
+    throw new UnsupportedImageError(
+      filename,
+      "image/heic",
+      `"${filename}" looks damaged or is a HEIC variant we can't read. Please ` +
+        "re-export it as a JPEG and try again.",
+    );
+  }
+};
+
 /**
  * Normalise an image to something GPT-Image-2.5 will accept.
  *
@@ -209,40 +313,32 @@ export type ConversionResult = {
  * untouched when it is already acceptable -- re-encoding a clean JPEG would
  * cost quality for nothing.
  *
- * Throws UnsupportedImageError for HEIC. sharp's prebuilt binary parses the
- * container but cannot decode the pixels, and that is identical on EB Linux,
- * so there is no server-side path -- the customer has to send something else.
+ * HEIC is decoded and always comes back as an sRGB JPEG. Throws
+ * UnsupportedImageError for anything that is not an image we can handle.
  */
 export const convertToSrgbJpeg = async (
   buffer: Buffer,
   filename: string,
 ): Promise<ConversionResult> => {
   const format = sniffFormat(buffer);
+  const isHeic = format === "image/heic";
 
-  if (format === "image/heic") {
+  if (!isHeic && !ACCEPTED_FORMATS.has(format)) {
     throw new UnsupportedImageError(
       filename,
       format,
-      `"${filename}" is in Apple's HEIC format, which we can't read. On iPhone, ` +
-        "go to Settings > Camera > Formats and choose Most Compatible, then " +
-        "re-take or re-export the photo as a JPEG.",
+      `"${filename}" isn't a JPEG, PNG, WebP or HEIC image. Please upload one of those.`,
     );
   }
 
-  if (!ACCEPTED_FORMATS.has(format)) {
-    throw new UnsupportedImageError(
-      filename,
-      format,
-      `"${filename}" isn't a JPEG, PNG or WebP image. Please upload one of those.`,
-    );
-  }
+  const input = isHeic ? await decodeHeic(buffer, filename) : buffer;
 
-  const profile = readColorProfile(buffer);
-  if (isSrgb(profile)) {
+  const profile = readColorProfile(input);
+  if (!isHeic && isSrgb(profile)) {
     return { buffer, contentType: format, converted: false, replacedProfile: null };
   }
 
-  const converted = await sharp(buffer)
+  const converted = await sharp(input)
     .rotate()
     .toColorspace("srgb")
     .withMetadata({ icc: "srgb" })

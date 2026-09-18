@@ -129,9 +129,8 @@ const sqlTextArray = (values: string[]) =>
 
 /**
  * HEIC, via macOS. sharp's libheif parses the container but cannot decode the
- * pixels, so convertToSrgbJpeg rejects HEIC by design -- that rejection is the
- * whole point of the upload-time fix. Here we are repairing files that already
- * exist, on a Mac, where ColorSync can do what sharp cannot.
+ * pixels. These backfills were validated against ColorSync, so they keep using
+ * sips rather than the heic-convert path the upload handler now uses.
  */
 const convertHeicWithSips = async (
   bytes: Buffer,

@@ -1,5 +1,7 @@
 # Convert training photos to sRGB at upload
 
+> **Superseded in part (HEIC).** HEIC uploads are no longer refused: `convertToSrgbJpeg` decodes them with `heic-convert` in a worker thread and returns an sRGB JPEG, keeping the photo's own ICC profile. The HEIC-rejection checklist item, the "Server-side HEIC decoding" non-goal and the reject-the-batch-on-HEIC rule below describe the earlier behaviour. See `src/utils/image_conversion.ts`.
+
 ## Goal
 Every training photo that reaches S3 from now on is an sRGB JPEG, and HEIC uploads are refused with a message the customer can act on.
 
