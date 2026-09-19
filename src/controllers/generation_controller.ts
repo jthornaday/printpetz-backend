@@ -1,10 +1,12 @@
 import AppConstants from "@/constants/app_constants";
 import AsyncHandler from "@/context/async_handler";
+import { addErrorLog } from "@/services/error_logs_service";
 import {
   EditorLook,
   handleEditImageLook,
   handleRemoveBackground,
 } from "@/services/fal_service";
+import { getFileBufferFromUrl } from "@/services/file_service";
 import {
   addGeneration,
   countUnfinishedGenerations,
@@ -12,11 +14,11 @@ import {
   providerColumns,
   uploadGenerationImageBuffer,
 } from "@/services/generation_service";
+import { getModelById } from "@/services/model_service";
 import { getImageProvider } from "@/services/providers";
 import { logOpenAIFailure } from "@/services/providers/openai_provider";
-import { getFileBufferFromUrl } from "@/services/file_service";
-import { getModelById } from "@/services/model_service";
-import { getStyleById } from "@/services/style_service";
+import { getCustomStyle, getStyleById } from "@/services/style_service";
+import { checkTrademarkViolation } from "@/services/trademark_service";
 import { updateUserCredit } from "@/services/user_service";
 import { EGenerationStatus } from "@/types/generation";
 import { ImageGenerationFailure } from "@/types/image_provider";
@@ -24,7 +26,10 @@ import errorResponse from "@/utils/errors/errorResponse";
 import { generateIdentityPrompt, GenerationLane } from "@/utils/fal_utils";
 import { getModelTriggerWord } from "@/utils/model_utils";
 import { getVariantForImage } from "@/utils/prompt_variants";
-import { generateImageSchema } from "@/utils/validation/generation_validation_schema";
+import {
+  generateCustomImageSchema,
+  generateImageSchema,
+} from "@/utils/validation/generation_validation_schema";
 
 // fal accepts a 32-bit unsigned seed.
 const SEED_RANGE = 4294967296;
@@ -378,6 +383,118 @@ const createImage = AsyncHandler.handle(async (req, res) => {
   res.dataCreateSuccess({ data: { generations } });
 });
 
+// Free-text generation. The trademark gate runs before anything else that costs
+// money or writes a row: a block means no image call, no rows, no charge.
+const createCustomImage = AsyncHandler.handle(async (req, res) => {
+  const user = req.user;
+  const {
+    description,
+    referencePhotoUrl,
+    modelId,
+    numberOfImages,
+    cutenessLevel,
+    seed,
+  } = generateCustomImageSchema.parse(req.body);
+
+  const provider = getImageProvider();
+  if (provider.name !== "openai") {
+    throw errorResponse.Api400Error({
+      errorDescription: "Custom descriptions are not available right now.",
+    });
+  }
+
+  const generationCharge = AppConstants.imageGenerationCredit * numberOfImages;
+  if (user.credits < generationCharge) {
+    throw errorResponse.Api403Error({
+      errorDescription: "You don`t have sufficient credits to generate image",
+    });
+  }
+
+  const check = await checkTrademarkViolation(description, referencePhotoUrl);
+  if (check.blocked) {
+    addErrorLog({
+      input: JSON.stringify({
+        userId: user.id,
+        description,
+        referencePhotoUrl: referencePhotoUrl ?? null,
+      }),
+      error: JSON.stringify({ reason: check.reason }),
+      type: "TRADEMARK_CHECK_BLOCKED",
+    });
+    throw errorResponse.Api400Error({
+      errorName: "TRADEMARK_BLOCKED",
+      errorDescription: `We can't make this one: ${check.reason} Please describe something original instead. You haven't been charged.`,
+    });
+  }
+
+  const [model, style] = await Promise.all([
+    getModelById(modelId),
+    getCustomStyle(),
+  ]);
+  if (!model || !style) {
+    throw errorResponse.Api404Error({
+      errorDescription: `${model ? "Style" : "Model"} not found`,
+    });
+  }
+
+  const unfinished = await countUnfinishedGenerations(user.id);
+  if (unfinished > 0) {
+    throw errorResponse.Api400Error({
+      errorDescription: `You already have ${unfinished} image${unfinished === 1 ? "" : "s"} being generated. They'll appear here shortly — no need to start another batch.`,
+    });
+  }
+
+  const petDescription = model.pet_description?.trim() || undefined;
+  const baseSeed = getBaseSeed(seed);
+  const group_id = Date.now();
+
+  // No pet name is passed: name placement is keyed on the theme, and a free-text
+  // description has no garment to anchor it to.
+  const prompt = generateIdentityPrompt(
+    `Cute pet, ${description}`,
+    cutenessLevel,
+    undefined,
+    style.name,
+    petDescription,
+    "reference",
+  );
+
+  const inserted = await Promise.all(
+    Array.from({ length: numberOfImages }).map(async (_, imageIndex) =>
+      addGeneration({
+        group_id,
+        model_id: modelId,
+        style_id: style.id,
+        user_id: user.id,
+        prompt,
+        seed: getImageSeed(baseSeed, imageIndex),
+        ...providerColumns(provider.name),
+        status: EGenerationStatus.GENERATING,
+        request_id: null,
+      }),
+    ),
+  );
+
+  const generations = inserted.filter(
+    (generation): generation is NonNullable<typeof generation> =>
+      generation !== null,
+  );
+  if (generations.length === 0) {
+    throw errorResponse.Api500Error({
+      errorDescription:
+        "We couldn't start your images and you haven't been charged. Please try again.",
+    });
+  }
+
+  await updateUserCredit(
+    user.id,
+    AppConstants.imageGenerationCredit * generations.length,
+    false,
+  );
+
+  res.dataCreateSuccess({ data: { generations } });
+});
+
 const downloadImage = AsyncHandler.handle(async (req, res) => {
   const generationId = Number(req.params.id);
   if (!Number.isInteger(generationId) || generationId <= 0) {
@@ -469,4 +586,10 @@ const removeBackground = AsyncHandler.handle(async (req, res) => {
   res.dataCreateSuccess({ data: { imageUrl: imageUrlWithoutBackground } });
 });
 
-export { createImage, downloadImage, editLook, removeBackground };
+export {
+  createCustomImage,
+  createImage,
+  downloadImage,
+  editLook,
+  removeBackground,
+};
