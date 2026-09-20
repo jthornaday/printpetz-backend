@@ -158,6 +158,45 @@ const NAME_PLACEMENTS: Array<{ aliases: string[]; garment: string; placement: st
 //   "Medieval Queen"        contains "queen"
 // Each of those has its own entry here; without this ordering they would
 // silently inherit the royal sash or the chef coat instead.
+  // --- Fantasy + Intergalactic + construction trades, added 19 Sept 2026 ---
+  // Placed here, above the pre-existing entries below, so "elf ranger" wins
+  // over the plain "elf" (Christmas Elf) entry and "space pirate" wins over
+  // the plain "pirate" entry -- both are real substring collisions.
+  { aliases: ["wizard"], garment: "robe cincture", placement: "in clean embroidered letters" },
+  { aliases: ["knight in shining armor", "shining armor"], garment: "breastplate", placement: "in clean engraved letters" },
+  { aliases: ["elf ranger"], garment: "leather vest", placement: "in clean stitched letters across the chest" },
+  { aliases: ["pixie"], garment: "petal dress bodice", placement: "in delicate stitched letters" },
+  { aliases: ["dragon rider"], garment: "flight jacket", placement: "in clean stitched letters across the chest" },
+  { aliases: ["royal sorceress"], garment: "gown sash", placement: "in clean embroidered letters" },
+  { aliases: ["troll"], garment: "burlap vest", placement: "in clean stitched letters across the chest" },
+  { aliases: ["gnome"], garment: "tunic", placement: "in clean stitched letters across the chest" },
+  { aliases: ["dwarf lord"], garment: "leather vest", placement: "in clean engraved letters" },
+  { aliases: ["necromancer"], garment: "robe hem", placement: "in clean stitched letters" },
+  { aliases: ["barbarian"], garment: "chest armor", placement: "in clean stitched letters" },
+  { aliases: ["thief"], garment: "chest harness", placement: "in clean stitched letters" },
+  { aliases: ["bard"], garment: "doublet", placement: "in clean stitched letters across the chest" },
+  { aliases: ["witch"], garment: "shawl", placement: "in clean stitched letters" },
+  { aliases: ["alchemist"], garment: "apron", placement: "in clean stitched letters across the chest" },
+  { aliases: ["space marine"], garment: "combat suit chest plate", placement: "in clean stenciled letters" },
+  { aliases: ["starship captain"], garment: "command jacket", placement: "in clean stitched letters across the chest" },
+  { aliases: ["galactic bounty hunter", "bounty hunter"], garment: "utility harness", placement: "in clean stenciled letters" },
+  { aliases: ["smuggler"], garment: "leather jacket", placement: "in clean stitched letters across the back" },
+  { aliases: ["space pirate"], garment: "bandolier", placement: "in clean stenciled letters" },
+  { aliases: ["alien diplomat"], garment: "formal robe sash", placement: "in clean embroidered letters" },
+  { aliases: ["galactic royalty"], garment: "formal robe", placement: "in clean embroidered letters" },
+  { aliases: ["void knight"], garment: "armor plate chest panel", placement: "in clean stenciled letters" },
+  { aliases: ["cosmic sorcerer"], garment: "starlit robe", placement: "in clean embroidered letters" },
+  { aliases: ["nebula explorer"], garment: "expedition suit", placement: "in clean stenciled letters across the chest" },
+  { aliases: ["asteroid miner"], garment: "work suit", placement: "in clean stenciled letters across the back" },
+  { aliases: ["cyborg engineer"], garment: "tool harness", placement: "in clean stenciled letters" },
+  { aliases: ["android companion"], garment: "plated bodysuit", placement: "in clean stenciled letters across the chest" },
+  { aliases: ["star cadet"], garment: "academy uniform", placement: "in clean stitched letters across the chest" },
+  { aliases: ["zero-g racer", "zero g racer"], garment: "racing suit chest panel", placement: "in clean stitched letters" },
+  { aliases: ["construction"], garment: "hi-vis vest", placement: "in clean block letters across the back" },
+  { aliases: ["mason"], garment: "canvas apron", placement: "in clean block letters across the chest" },
+  { aliases: ["roofer", "roofing"], garment: "hard hat", placement: "in clean block letters across the front brim" },
+  { aliases: ["framer", "framing"], garment: "tool belt", placement: "stamped in clean block letters on the leather" },
+
   { aliases: ["rowing", "rower"], garment: "rowing singlet", placement: "in clean block letters across the chest" }, // Rowing
   { aliases: ["archery", "archer"], garment: "quiver strap", placement: "in clean block letters across the chest" }, // Archery
   { aliases: ["curling", "curler"], garment: "curling jacket", placement: "in clean block letters across the back" }, // Curling
