@@ -237,7 +237,7 @@ const createImage = AsyncHandler.handle(async (req, res) => {
       });
     }
 
-    const generations = await Promise.all(
+    const inserted = await Promise.all(
       Array.from({ length: numberOfImages }).map(async (_, imageIndex) =>
         addGeneration({
           group_id,
@@ -258,10 +258,28 @@ const createImage = AsyncHandler.handle(async (req, res) => {
       ),
     );
 
+    // addGeneration returns null on a failed insert rather than throwing. A row
+    // that did not save is nothing the worker will run and nothing History will
+    // show, so it is neither charged for nor returned to the frontend.
+    const generations = inserted.filter(
+      (generation): generation is NonNullable<typeof generation> =>
+        generation !== null,
+    );
+    if (generations.length === 0) {
+      throw errorResponse.Api500Error({
+        errorDescription:
+          "We couldn't start your images and you haven't been charged. Please try again.",
+      });
+    }
+
     // Charged up front and refunded on failure, exactly as the FAL lane
     // already does from its webhook. One billing model, one refund path, and
     // no way to queue work you cannot afford.
-    await updateUserCredit(user.id, generationCharge, false);
+    await updateUserCredit(
+      user.id,
+      AppConstants.imageGenerationCredit * generations.length,
+      false,
+    );
 
     res.dataCreateSuccess({ data: { generations } });
     return;
