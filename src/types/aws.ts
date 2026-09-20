@@ -15,4 +15,5 @@ export enum EUploadPath {
   GENERATION_IMAGE = "generations/[USER_ID]",
   TRAINING_IMAGE = "training-images/[USER_ID]",
   MODEL = "models/[USER_ID]",
+  CUSTOM_REFERENCE = "custom-reference/[USER_ID]",
 }
