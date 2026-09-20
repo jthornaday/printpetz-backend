@@ -11,41 +11,25 @@ import errorResponse from "@/utils/errors/errorResponse";
  */
 export const verifyToken = async (req, res, next) => {
   try {
-    let supabaseAuthToken: string | null = null;
-    let userId: string | null = null;
+    const authorization = req.headers.authorization;
 
-    if (
-      req.headers.authorization &&
-      req.headers.authorization.startsWith("Bearer")
-    ) {
-      supabaseAuthToken = req.headers.authorization.split(" ")[1];
-    }
-
-    if (
-      !supabaseAuthToken &&
-      !req.headers["user-id"] &&
-      !req.baseUrl.includes("/public")
-    ) {
-      throw errorResponse.Api400Error({
+    if (!authorization || !authorization.startsWith("Bearer ")) {
+      throw errorResponse.Api401Error({
         errorDescription: "please provide authorization token in header",
       });
     }
 
-    if (supabaseAuthToken) {
-      const userResponse = await supabase.auth.getUser(supabaseAuthToken);
+    const supabaseAuthToken = authorization.split(" ")[1];
+    const userResponse = await supabase.auth.getUser(supabaseAuthToken);
 
-      if (userResponse.error) {
-        throw errorResponse.Api401Error({
-          errorDescription: userResponse.error.message,
-        });
-      }
-
-      userId = userResponse.data?.user.id as string;
+    if (userResponse.error || !userResponse.data?.user) {
+      throw errorResponse.Api401Error({
+        errorDescription:
+          userResponse.error?.message ?? "invalid authorization token",
+      });
     }
 
-    if (req.headers["user-id"] && !userId) {
-      userId = req.headers["user-id"];
-    }
+    const userId = userResponse.data.user.id;
 
     const supabaseUser = await getUser(userId);
     if (!supabaseUser) {
