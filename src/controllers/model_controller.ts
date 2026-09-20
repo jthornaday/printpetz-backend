@@ -1,7 +1,7 @@
 import AppConstants from "@/constants/app_constants";
 import AsyncHandler from "@/context/async_handler";
 import { handleTrainModel } from "@/services/fal_service";
-import { addModel } from "@/services/model_service";
+import { addModel, getModelById, updateModel } from "@/services/model_service";
 import { updateUserCredit } from "@/services/user_service";
 import { EModelStatus } from "@/types/model";
 import errorResponse from "@/utils/errors/errorResponse";
@@ -40,4 +40,31 @@ const trainModel = AsyncHandler.handle(async (req, res) => {
   res.dataCreateSuccess({ data: { model } });
 });
 
-export { trainModel };
+const deleteModel = AsyncHandler.handle(async (req, res) => {
+  const modelId = Number(req.params.id);
+  if (!Number.isInteger(modelId) || modelId <= 0) {
+    throw errorResponse.Api400Error({ errorDescription: "Invalid model id" });
+  }
+
+  const model = await getModelById(modelId);
+  if (!model || model.user_id !== req.user.id) {
+    throw errorResponse.Api404Error({ errorDescription: "Model not found" });
+  }
+
+  if (model.status === EModelStatus.TRAINING) {
+    throw errorResponse.Api400Error({
+      errorDescription: "Model is still training and can't be deleted yet",
+    });
+  }
+
+  const updated = await updateModel({ id: model.id, is_deleted: true });
+  if (!updated) {
+    throw errorResponse.Api500Error({
+      errorDescription: "Failed to delete model",
+    });
+  }
+
+  res.dataUpdateSuccess();
+});
+
+export { deleteModel, trainModel };
