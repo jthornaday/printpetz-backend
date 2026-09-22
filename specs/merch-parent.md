@@ -17,20 +17,35 @@ Upscaling is where identity dies. Creative upscalers invent detail and will repa
 fur, shift markings, and soften muzzles. That breaks the one standard in CLAUDE.md
 at the exact moment money changes hands. This must be measured, not assumed.
 
-## Architecture — DECIDED 2026-09-22
-**Shopify headless (Storefront API) on a Shopify Plus plan.** Catalog, cart, and
-checkout all stay on printpetz.com. Jake accepted the ~$2,300/mo Plus cost to keep
-payment on-domain; the standard-plan redirect to checkout.shopify.com was rejected.
+## Architecture — DECIDED 2026-09-22 (revised same day)
+**Shopify headless (Storefront API) on the BASIC plan.** Store created:
+`99ebb5-xt.myshopify.com`. $1/mo until **2026-12-21**, then $39/mo.
 
-Rejected alternatives, for the record:
-- Shopify hosted checkout — least code, but customer leaves printpetz.com.
-- Stripe + POD API direct, no Shopify — Stripe is already wired here
-  (`stripe_service.ts`, webhook handling, credits) and this would reach on-site
-  checkout with no monthly fee, at the cost of Shopify's merchant admin and order
-  management. Revisit only if Plus is dropped.
+Catalog and cart live on printpetz.com via the Storefront API, which is available on
+every Shopify plan. **Checkout redirects to checkout.shopify.com** for the final
+payment step. That redirect is the one thing Plus would remove.
 
-M2 is unblocked by this decision. Do not sign up for Plus until M0 reports —
-M0 decides whether there is a poster business to build a storefront for.
+Plus was considered and rejected. It costs $2,300/mo against Basic's $39 — a $2,261
+monthly gap — and buys on-domain checkout plus a 0.65% better card rate
+(2.25% vs 2.9%). Recovering the gap on rates alone needs
+**$2,261 / 0.0065 = ~$348,000/month in sales**, roughly $4.2M/year. Pre-launch with
+zero customers, that is not a close call.
+
+Upgrading later is trivial and the headless work carries over unchanged, so nothing
+here is locked in.
+
+Also rejected: Shopify's own hosted storefront (least code, but no control), and
+Stripe + POD API direct with no Shopify (Stripe is already wired in this repo and
+would give on-domain checkout free, at the cost of Shopify's merchant admin and order
+management). Revisit the Stripe route only if Shopify's redirect proves to hurt
+conversion.
+
+**M2 must be built assuming the checkout redirect**, not around it.
+
+### Store housekeeping, not yet done
+- Store is still named "My Store" on a random `myshopify.com` subdomain.
+- printpetz.com needs connecting as the storefront domain.
+- The $1 promo ends 2026-12-21. Set a reminder.
 
 ## Milestones
 
