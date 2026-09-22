@@ -8,7 +8,9 @@
     "build": "tsc",
     "build:watch": "tsc --watch",
     "start": "node lib/index.js",
-    "dev": "nodemon lib/index.js"
+    "dev": "nodemon lib/index.js",
+    "upscale-eval": "node -r module-alias/register lib/scripts/upscale-eval.js",
+    "print-file": "node -r module-alias/register lib/scripts/print-file.js"
   },
   "keywords": [
     "Pet",

@@ -95,6 +95,18 @@ const PET_PICKS: PetPick[] = [
     species: "dog",
     note: "George 1.0 - confirmed a dog by Jake, 14 Sept. Second dog in the matrix",
   },
+  {
+    modelId: 28,
+    petName: "Moses",
+    species: "unconfirmed",
+    note: "Moses - the sRGB training. NOT id 14, which the colour audit reports BROKEN (Display P3). Added 2026-09-22 for the M0 upscale eval",
+  },
+  {
+    modelId: 13,
+    petName: "Darla",
+    species: "unconfirmed",
+    note: "Darla 1 - only Darla training in the table. no-profile photos, which is Wizard's case and passes on OpenAI. Added 2026-09-22 for the M0 upscale eval",
+  },
 ];
 
 const IMAGES_PER_CELL = 2;
