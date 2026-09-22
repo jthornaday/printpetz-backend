@@ -77,3 +77,7 @@ lib/
 
 # Bakeoff output: generated images and contact sheets, not source.
 scripts/bakeoff/
+
+# Claude outputs: evaluation images, print files and the rembg cache.
+# Evidence and findings live in specs/; the images themselves are local only.
+Claude outputs/
