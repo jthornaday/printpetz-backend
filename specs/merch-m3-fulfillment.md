@@ -33,7 +33,39 @@ See `specs/merch-parent.md`.
   Use the catalog endpoints (`/products`, `/products/{id}`) for variant ids.
 - 11oz White Glossy Mug is catalog variant **1320**.
 
-## The duplicate-fulfillment risk — READ THIS FIRST
+## The duplicate-order question — CHECKED 2026-09-23
+
+**Printful setting: "Manually confirm imported orders" is SELECTED.** Its text:
+"All orders from your ecommerce store will be imported as drafts. You can then
+confirm them to be fulfilled." Nothing auto-fulfils. Found at
+Printful -> Settings -> Store settings -> Orders -> Order import settings.
+**Do not change that radio.**
+
+That removes the catastrophic case: no order ships twice, because nothing ships
+without a human confirming it.
+
+It does NOT remove duplication. The setting governs confirmation, not import —
+Printful still imports every Shopify order. Once live, each Shopify order yields
+**two Printful drafts**:
+
+1. Printful's own import, carrying whatever placeholder design is on the synced product
+2. M3's API order, carrying the customer's actual pet
+
+Both drafts. Neither prints. Safe, but someone must pick the right one every time, and
+picking wrong means printing a placeholder instead of the customer's pet.
+
+**This is avoidable.** M3 uses Printful CATALOG variant ids (1320, 4463, ...), not
+store-product ids, so fulfilment does not depend on the Shopify<->Printful app
+connection at all. That connection exists only to create Shopify products for the
+storefront. Options once products exist:
+
+- Disconnect the Printful app from Shopify. Products stay in Shopify; imports stop.
+- Or run a separate Printful store of type Manual Order / API for fulfilment only.
+
+**Settle this before setting `PRINTFUL_AUTO_CONFIRM=true`.** While orders are drafts,
+a duplicate costs nothing but attention.
+
+## The original risk, now resolved — kept for context
 Printful's Shopify app may **auto-import** the same order we create via API. If it
 does, every order is fulfilled twice: once by us with the right pet, once by Printful
 with whatever placeholder artwork is attached to the synced product. The customer gets
