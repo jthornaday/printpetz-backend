@@ -60,8 +60,24 @@ background is the artwork there — but `cutout` stays available if a customer w
 `pillow_18x18` was gated pending a 4x print test. **That gate is lifted** — Jake
 printed Wizard at 16x20 (3.91x) on 2026-09-22 and it works. All tiers are proven.
 
-Exact print areas for mug, koozie and coaster are estimates. Confirm against the
-provider's own product spec before these go live, and correct the table here.
+### Verified against Printful's design tool, 2026-09-22
+- **mug_11oz** — the White Glossy Mug template is a landscape wrap, but Printful's
+  tool auto-places a portrait image as a panel on each side of the handle. The
+  2400x3000 poster file was accepted with no warning and mockups rendered correctly.
+  **The poster file doubles as the mug file** — three SKUs now share one asset
+  (poster_8x10, framed_8x10, mug_11oz). Wrap-style mugs from other suppliers are
+  genuinely landscape and would need separate composition.
+- **canvas_16x20** — the 3800x4600 file accepted at **200 DPI with no resolution
+  warning**, against Printful's stated 300 DPI recommendation. Their floor is 150.
+- **coaster** — corrected to Printful's real 3.75in square (1125x1125), was 4x4.
+
+**OPEN RISK, canvas double-wrap.** Our file carries 1.5in of mirrored bleed. If
+Printful also applies its own wrap, the visible face loses another 1.5in per edge.
+A mockup cannot reveal this — it renders identically either way. Verify on the FIRST
+physical canvas order before selling canvases. If it comes back cropped tighter than
+the mockup, set `bleedIn: 0` on canvas_16x20 and ship the flat 3200x4000.
+
+Still unverified in the design tool: koozie, pillow_18x18, coaster placement.
 
 ## Subject-aware cropping
 Only for products marked crop=yes. 8x10 and 16x20 are native 4:5 and must not crop.
