@@ -47,6 +47,37 @@ conversion.
 - printpetz.com needs connecting as the storefront domain.
 - The $1 promo ends 2026-12-21. Set a reminder.
 
+## M3 BLOCKER, found 2026-09-22 — Printful store platform type
+Token verified working against Printful's API (store id **18796047**, "My Store",
+type **shopify**). `GET /orders` and `GET /webhooks` return 200. But
+`GET /store/products` returns **400: "This API endpoint applies only to Printful
+stores based on the Manual Order / API platform."**
+
+That is not a scope problem. Printful stores have a platform type, and it decides how
+fulfilment works:
+
+- **Shopify-platform store** — Printful auto-imports orders from Shopify and fulfils
+  them using the print file attached to the SYNCED PRODUCT. One fixed design per SKU.
+- **Manual Order / API store** — orders are created via API with a **file URL per
+  order**. This is the custom-artwork model.
+
+**PrintPetz requires per-order files.** Every order carries a different pet. If
+Printful auto-imports a Shopify order and fulfils from the synced product's stored
+design, every customer receives whatever placeholder artwork is attached to that SKU.
+That failure ships silently and looks correct until parcels arrive.
+
+Options M3 must choose between (none tested yet):
+1. Add a SECOND Printful store of type Manual Order / API for fulfilment, keeping the
+   Shopify store for the storefront only. Create every order through the API.
+2. Keep one Shopify-platform store but stop Printful auto-importing (hold orders), and
+   create the Printful order ourselves with `items[].files[]` carrying the customer's
+   file URL.
+3. Confirm whether `POST /orders` with an explicit `files[]` array overrides the synced
+   product's design on a Shopify-platform store. If it does, no second store is needed.
+
+Option 3 is the cheapest if it works and should be tested first — a single API call
+against a test order answers it. Do NOT build M3 before this is settled.
+
 ## Milestones
 
 | # | Spec | What it settles | Blocked by |
