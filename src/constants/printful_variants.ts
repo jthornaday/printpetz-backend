@@ -39,9 +39,16 @@ export const PRINTFUL_VARIANTS: Record<string, PrintfulVariant> = {
     variantId: 1320, productId: 19,
     label: 'White Glossy Mug — 11 oz', priceUsdAtLookup: 6.07,
   },
-  koozie: {
+  can_cooler: {
     variantId: 19461, productId: 764,
-    label: 'Can Cooler — Regular 12 oz, White', priceUsdAtLookup: 3.49,
+    label: "Can Cooler — Regular 12 oz, White", priceUsdAtLookup: 3.49,
+  },
+  // Shopify sells Regular and Slim; M3 maps one Printful variant per product key, so
+  // Slim (19462) currently falls through to Regular. If Slim must print differently,
+  // this needs a size dimension like the frontend catalog has.
+  pint_glass_16oz: {
+    variantId: 16359, productId: 653,
+    label: "Shaker Pint Glass (16 oz)", priceUsdAtLookup: 15.26,
   },
   pillow_18x18: {
     variantId: 4532, productId: 83,

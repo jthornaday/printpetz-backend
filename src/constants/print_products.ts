@@ -72,9 +72,21 @@ export const PRINT_PRODUCTS: Record<string, PrintProduct> = {
     key: "mug_11oz", label: "11oz mug (side placement)",
     widthIn: 8, heightIn: 10, dpi: 300, bleedIn: 0, defaultTreatment: "panel",
   },
-  koozie: {
-    key: "koozie", label: "Can koozie",
+  // Renamed from "koozie" 2026-09-23 to match the Shopify product. "Koozie" is a
+  // trademark (Koozie Group); Printful lists it as "Can Cooler", which is why it
+  // could not be found by that name. Catalog product 764.
+  can_cooler: {
+    key: "can_cooler", label: "Can cooler",
     widthIn: 3.5, heightIn: 4, dpi: 300, bleedIn: 0, defaultTreatment: "panel",
+  },
+  // UNVERIFIED DIMENSIONS. Printful's Shaker Pint Glass (catalog 653, variant 16359)
+  // is a wrap, and the mug taught us that spec sheets lie — the design tool is the
+  // only reliable source. These numbers are a placeholder so the key exists and the
+  // frontend/backend match. Run the pint glass through Printful's design tool and
+  // correct them before selling one.
+  pint_glass_16oz: {
+    key: "pint_glass_16oz", label: "16oz shaker pint glass (DIMENSIONS UNVERIFIED)",
+    widthIn: 8, heightIn: 10, dpi: 300, bleedIn: 0, defaultTreatment: "panel",
   },
   pillow_18x18: {
     key: "pillow_18x18", label: '18x18" decorative pillow',
