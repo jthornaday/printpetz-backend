@@ -55,11 +55,12 @@ export const PRINT_PRODUCTS: Record<string, PrintProduct> = {
     key: "canvas_16x20", label: '16x20" gallery-wrap canvas',
     widthIn: 16, heightIn: 20, dpi: 200, bleedIn: 1.5, defaultTreatment: "panel",
   },
-  // Printful coasters are 3.6in round / 3.75in square, not 4x4. Square at 300 DPI
-  // is 1125x1125. Still unverified in the design tool.
+  // Printful's Cork-Back Coaster (catalog product 611, variant 15662) is
+  // 3.74in x 3.74in exactly, per the live catalog on 2026-09-23. Not 4x4, and not
+  // the 3.75 I had from secondary sources. 3.74 x 300 DPI = 1122x1122.
   coaster_4x4: {
-    key: "coaster_4x4", label: '3.75" square coaster',
-    widthIn: 3.75, heightIn: 3.75, dpi: 300, bleedIn: 0, defaultTreatment: "panel",
+    key: "coaster_4x4", label: '3.74" cork-back coaster',
+    widthIn: 3.74, heightIn: 3.74, dpi: 300, bleedIn: 0, defaultTreatment: "panel",
   },
   // Printful White Glossy Mug uses a SIDE PLACEMENT, not a full wrap. Verified
   // 2026-09-22 by uploading Darla-8x10-300dpi.jpg (2400x3000) into Printful's

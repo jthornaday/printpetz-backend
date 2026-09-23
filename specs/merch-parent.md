@@ -111,7 +111,7 @@ Two things that fell out of the test and matter:
 | M1 | `merch-m1-print-file-service.md` | Print-file generation: Lanczos resize per product, subject-aware crop, canvas bleed | M0 — **DONE, spec written** |
 | ~~M1b~~ | folded into M1 | Both treatments (panel + cutout) are customer-selectable. rembg tested and viable. | resolved 2026-09-22 |
 | M2 | `merch-m2-storefront.md` | Catalog, product page, cart | architecture decision above |
-| M3 | `merch-m3-order-fulfillment.md` | Push paid orders to the POD provider with the customer's print file | M1, M2 |
+| M3 | `merch-m3-fulfillment.md` | Paid Shopify order -> Printful with the customer's print file | **DONE 2026-09-23** |
 | M4 | `merch-m4-credit-refund.md` | Refund generation credits when an order containing that image is paid | M3 |
 
 Only M0 is written. The rest get written once M0 reports back, because M0's answer
