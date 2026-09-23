@@ -47,7 +47,7 @@ conversion.
 - printpetz.com needs connecting as the storefront domain.
 - The $1 promo ends 2026-12-21. Set a reminder.
 
-## M3 BLOCKER, found 2026-09-22 — Printful store platform type
+## M3 — Printful integration, RESOLVED 2026-09-22 (was a blocker)
 Token verified working against Printful's API (store id **18796047**, "My Store",
 type **shopify**). `GET /orders` and `GET /webhooks` return 200. But
 `GET /store/products` returns **400: "This API endpoint applies only to Printful
@@ -66,17 +66,42 @@ Printful auto-imports a Shopify order and fulfils from the synced product's stor
 design, every customer receives whatever placeholder artwork is attached to that SKU.
 That failure ships silently and looks correct until parcels arrive.
 
-Options M3 must choose between (none tested yet):
-1. Add a SECOND Printful store of type Manual Order / API for fulfilment, keeping the
-   Shopify store for the storefront only. Create every order through the API.
-2. Keep one Shopify-platform store but stop Printful auto-importing (hold orders), and
-   create the Printful order ourselves with `items[].files[]` carrying the customer's
-   file URL.
-3. Confirm whether `POST /orders` with an explicit `files[]` array overrides the synced
-   product's design on a Shopify-platform store. If it does, no second store is needed.
+### RESOLVED — option 3 works. No second Printful store needed.
+Tested 2026-09-22 with a real unconfirmed draft order (id 177621495, since discarded):
 
-Option 3 is the cheapest if it works and should be tested first — a single API call
-against a test order answers it. Do NOT build M3 before this is settled.
+```
+POST /orders  (no ?confirm -> draft)   -> 200
+  item: variant_id 1320, White Glossy Mug (White / 11 oz)
+  files: [{ url: <our print file on public storage> }]
+  status: draft — nothing queued, nothing printed
+```
+
+Polling the order until Printful fetched the file:
+
+```
+file status: ok    dpi: 300    size: 2400x3000    preview: generated
+```
+
+**A Shopify-platform store DOES accept `POST /orders` with an explicit `files[]`
+array.** The per-order file is used; the synced product's design does not override it.
+M3 creates orders directly against this store.
+
+Two things that fell out of the test and matter:
+
+- **Printful reads the embedded DPI metadata.** It reported `dpi: 300`, which is the
+  density the print-file service writes via `withMetadata({ density })`. That step is
+  load-bearing, not cosmetic. Do not drop it.
+- **Real costs for an 11oz mug**, which is the first true unit economics we have:
+  subtotal $6.07 + shipping $6.69 + tax $0.65 = **$13.41 landed**. Shipping is half
+  the cost of a single-item order, so multi-item carts are where margin lives. Note
+  the catalog page advertises shipping "from $4.99"; actual was $6.69.
+
+### Still open for M3
+- Whether Printful ALSO auto-imports the same Shopify order, producing a duplicate.
+  If it does, the Shopify integration must be set to not auto-fulfil, or orders held.
+  **Test this before going live** — a duplicate order means printing and shipping
+  everything twice.
+- Confirmed orders (`?confirm=1`) were never exercised. Only drafts.
 
 ## Milestones
 
