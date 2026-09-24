@@ -62,6 +62,26 @@ type PrintfulResponse = {
   error?: { message?: string };
 };
 
+/**
+ * Describe the credential WITHOUT revealing it, so a config problem in a deployed
+ * environment is diagnosable from the error alone. Printful returns the identical
+ * "access token provided is invalid" message whether the token is wrong, empty or
+ * undefined, which is useless when you cannot read the environment directly.
+ */
+const credentialShape = () => {
+  const raw = process.env.PRINTFUL_API_KEY;
+  if (raw === undefined) return "PRINTFUL_API_KEY is UNDEFINED in this environment";
+  const trimmed = raw.trim();
+  return [
+    `len=${raw.length}`,
+    `trimmed_len=${trimmed.length}`,
+    `has_whitespace=${raw !== trimmed}`,
+    `has_quotes=${/^["']|["']$/.test(trimmed)}`,
+    `first4=${trimmed.slice(0, 4)}`,
+    `last4=${trimmed.slice(-4)}`,
+  ].join(" ");
+};
+
 const printfulFetch = async (
   path: string,
   init?: RequestInit,
@@ -152,12 +172,18 @@ export const createFulfillmentOrder = async (req: FulfillmentRequest) => {
 
   if (status !== 200 || !json?.result?.id) {
     const message = json?.error?.message ?? json?.result ?? `HTTP ${status}`;
+    // A 401 here is almost always configuration, not code. Say what the credential
+    // looks like so nobody spends an hour trading theories about it.
+    const detail =
+      status === 401 || /access token/i.test(String(message))
+        ? ` [credential: ${credentialShape()}]`
+        : "";
     addErrorLog({
       input: JSON.stringify({ externalId: req.externalId, body }),
       error: JSON.stringify(json),
       type: "PRINTFUL_ORDER_CREATE",
     });
-    throw new Error(`Printful order create failed: ${message}`);
+    throw new Error(`Printful order create failed: ${message}${detail}`);
   }
 
   // Traceability: a complaint about the wrong pet must be answerable with one grep.
