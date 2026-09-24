@@ -79,14 +79,19 @@ export const PRINT_PRODUCTS: Record<string, PrintProduct> = {
     key: "can_cooler", label: "Can cooler",
     widthIn: 3.5, heightIn: 4, dpi: 300, bleedIn: 0, defaultTreatment: "panel",
   },
-  // UNVERIFIED DIMENSIONS. Printful's Shaker Pint Glass (catalog 653, variant 16359)
-  // is a wrap, and the mug taught us that spec sheets lie — the design tool is the
-  // only reliable source. These numbers are a placeholder so the key exists and the
-  // frontend/backend match. Run the pint glass through Printful's design tool and
-  // correct them before selling one.
+  // Shaker Pint Glass, catalog 653 / variant 16359. Real spec from Printful's File
+  // guidelines, 2026-09-23: print file 9.58in x 5.04in @300 DPI = 2874x1512.
+  //
+  // NOT SELLABLE YET, and the dimensions below say why: 1.9:1 LANDSCAPE against a
+  // 0.81 portrait source. A centre-crop yields a horizontal slice of dog. Like a
+  // wrap mug, this needs composition — the pet placed as a panel on a wider canvas —
+  // not a crop. That is real work, not a table row.
+  //
+  // The key stays so the three catalogs agree. It is hidden from the frontend
+  // picker, so nothing can order one until the composition step exists.
   pint_glass_16oz: {
-    key: "pint_glass_16oz", label: "16oz shaker pint glass (DIMENSIONS UNVERIFIED)",
-    widthIn: 8, heightIn: 10, dpi: 300, bleedIn: 0, defaultTreatment: "panel",
+    key: "pint_glass_16oz", label: "16oz shaker pint glass (NOT SELLABLE — needs wrap composition)",
+    widthIn: 9.58, heightIn: 5.04, dpi: 300, bleedIn: 0, defaultTreatment: "panel",
   },
   pillow_18x18: {
     key: "pillow_18x18", label: '18x18" decorative pillow',
