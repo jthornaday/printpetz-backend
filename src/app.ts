@@ -12,20 +12,22 @@ import modelRoutes from "@/router/model_router";
 import publicRoutes from "@/router/public_router";
 import stripeRoutes from "@/router/stripe_routes";
 import webhookRoutes from "@/router/webhook_routes";
+import shopifyRoutes from "@/router/shopify_routes";
 
 import { verifyToken } from "./middleware/verify_token";
 
 const app = express();
 
 const setupForStripeWebhooks = {
-  // Because Stripe needs the raw body, we compute it but only when hitting the Stripe callback URL.
+  // Stripe and Shopify both verify a signature against the RAW body, so capture it
+  // for those callback URLs only.
   verify: function (
     req: IncomingMessage & { originalUrl?: string; rawbody?: string },
     res: ServerResponse,
     buf: Buffer,
   ) {
     const url = req.originalUrl;
-    if (url?.startsWith("/webhook/stripe")) {
+    if (url?.startsWith("/webhook/stripe") || url?.startsWith("/webhook/shopify")) {
       req.rawbody = buf.toString();
     }
   },
@@ -52,6 +54,7 @@ app.get("/favicon.ico", (req, res) =>
 );
 
 app.use("/webhook", webhookRoutes);
+app.use("/webhook/shopify", shopifyRoutes);
 
 // PUBLIC ROUTES START //
 
