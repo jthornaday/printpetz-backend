@@ -179,3 +179,16 @@ replay exercises exactly what production does, size mapping included.
 
 Unverified: whether Printful's 15 oz and 20 oz mugs place the 2400x3000 side-panel file as
 well as the 11 oz does. Check the first physical order of each size.
+
+### 5. Only print our own images
+
+`_generation_url` comes from the customer's browser, so the webhook printed whatever
+address the cart carried. It now accepts only `https://<our CloudFront>/generations/…`
+(`isOurGenerationUrl`). Anything else is an `UnfulfillableOrderError`: 200 to Shopify,
+logged as `SHOPIFY_ORDER_UNFULFILLABLE`, nothing sent to Printful. Tested against
+look-alike hosts, other folders on our CDN (training photos, print files), path
+traversal, http, and garbage.
+
+Still open: it does not check that the generation belongs to the person paying. That
+needs the order to carry the user id; low risk (they'd be paying to print someone
+else's pet art from a URL they'd have to obtain), so deferred.
