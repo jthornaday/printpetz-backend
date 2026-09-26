@@ -20,49 +20,14 @@ import path from "node:path";
 
 import { Treatment } from "@/constants/print_products";
 import { uploadFileToS3 } from "@/services/aws_service";
+import { fulfillmentFromShopifyOrder } from "@/controllers/shopify_webhook_controller";
 import {
   createFulfillmentOrder, waitForFileValidation, cancelOrder,
-  FulfillmentItem, FulfillmentRequest, PrintfulRecipient,
+  FulfillmentRequest,
 } from "@/services/printful_service";
 
 const arg = (n: string) => process.argv.find((a) => a.startsWith(`--${n}=`))?.split("=").slice(1).join("=");
 const flag = (n: string) => process.argv.includes(`--${n}`);
-
-/** Shopify puts custom data on line items as name/value properties. */
-const propOf = (li: any, name: string): string | undefined =>
-  (li.properties ?? []).find((p: any) => p.name === name || p.name === `_${name}`)?.value;
-
-const fromShopifyOrder = (order: any): FulfillmentRequest => {
-  const a = order.shipping_address ?? order.billing_address;
-  if (!a) throw new Error("order has no shipping_address or billing_address");
-
-  const recipient: PrintfulRecipient = {
-    name: a.name ?? `${a.first_name ?? ""} ${a.last_name ?? ""}`.trim(),
-    address1: a.address1,
-    address2: a.address2 ?? undefined,
-    city: a.city,
-    state_code: a.province_code ?? undefined,
-    country_code: a.country_code,
-    zip: a.zip,
-    email: order.email ?? undefined,
-  };
-
-  const items: FulfillmentItem[] = (order.line_items ?? []).map((li: any, i: number) => {
-    const sourceImageUrl = propOf(li, "generation_url");
-    const productKey = propOf(li, "product_key");
-    const treatment = (propOf(li, "treatment") ?? "panel") as Treatment;
-    if (!sourceImageUrl) throw new Error(`line item ${i} has no generation_url property`);
-    if (!productKey) throw new Error(`line item ${i} has no product_key property`);
-    return {
-      sourceImageUrl, productKey, treatment,
-      quantity: li.quantity ?? 1,
-      generationId: propOf(li, "generation_id"),
-    };
-  });
-
-  if (!items.length) throw new Error("order has no line items");
-  return { externalId: String(order.id), recipient, items };
-};
 
 /** Publish a local pet image to S3 so the real fetch path is exercised. */
 const demoSourceUrl = async (pet: string) => {
@@ -108,7 +73,7 @@ const main = async () => {
   }
 
   const req = file
-    ? fromShopifyOrder(JSON.parse(fs.readFileSync(file, "utf8")))
+    ? fulfillmentFromShopifyOrder(JSON.parse(fs.readFileSync(file, "utf8")))
     : await demoOrder();
 
   console.log(`\nexternal id : ${req.externalId}`);

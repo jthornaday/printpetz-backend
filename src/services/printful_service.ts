@@ -46,6 +46,11 @@ export type FulfillmentItem = {
   quantity: number;
   /** For tracing a complaint back to an image. Logged on every order. */
   generationId?: string | number;
+  /**
+   * The exact Printful variant, resolved from what the customer paid for in Shopify.
+   * When absent, the product key's default variant is used.
+   */
+  printfulVariantId?: number;
 };
 
 export type FulfillmentRequest = {
@@ -53,6 +58,11 @@ export type FulfillmentRequest = {
   externalId: string;
   recipient: PrintfulRecipient;
   items: FulfillmentItem[];
+  /**
+   * Never confirm, even when PRINTFUL_AUTO_CONFIRM=true. Set for Shopify test orders,
+   * so a test checkout can prove the pipeline without anything printing or billing.
+   */
+  forceDraft?: boolean;
 };
 
 /** Printful's envelope. Typed loosely on purpose — their shape varies by endpoint. */
@@ -158,13 +168,14 @@ export const createFulfillmentOrder = async (req: FulfillmentRequest) => {
     external_id: req.externalId,
     recipient: req.recipient,
     items: prepared.map(({ item, url }) => ({
-      variant_id: variantForProduct(item.productKey).variantId,
+      variant_id: item.printfulVariantId ?? variantForProduct(item.productKey).variantId,
       quantity: item.quantity,
       files: [{ url }],
     })),
   };
 
-  const query = autoConfirm() ? "?confirm=1" : "";
+  const confirm = autoConfirm() && !req.forceDraft;
+  const query = confirm ? "?confirm=1" : "";
   const { status, json } = await printfulFetch(`/orders${query}`, {
     method: "POST",
     body: JSON.stringify(body),
@@ -195,6 +206,7 @@ export const createFulfillmentOrder = async (req: FulfillmentRequest) => {
         printfulOrderId: json.result.id,
         generationId: item.generationId ?? null,
         productKey: item.productKey,
+        printfulVariantId: item.printfulVariantId ?? variantForProduct(item.productKey).variantId,
         treatment: item.treatment,
         fileUrl: url,
       }),
@@ -205,7 +217,7 @@ export const createFulfillmentOrder = async (req: FulfillmentRequest) => {
     created: true as const,
     orderId: json.result.id as number,
     status: json.result.status as string,
-    confirmed: autoConfirm(),
+    confirmed: confirm,
     costs: json.result.costs,
     items: json.result.items,
   };
