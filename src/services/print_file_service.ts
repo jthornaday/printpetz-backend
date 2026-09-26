@@ -23,9 +23,16 @@ import {
   PRINT_PRODUCTS, PrintProduct, Treatment,
   needsSubjectAwareCrop, outputSize, productAspect,
 } from "@/constants/print_products";
+import { getObjectFromS3, uploadFileToS3 } from "./aws_service";
 import { handleRemoveBackground } from "./fal_service";
 
 const CACHE_DIR = path.join(process.cwd(), "Claude outputs", ".print-cache");
+/**
+ * Shared rembg cache. Local disk alone is per-instance and wiped on every EB deploy,
+ * so the shop preview and the eventual print could be cut from different masks.
+ * S3 makes the first mask the only mask. Bump the version if the rembg model changes.
+ */
+const derivedKey = (hash: string) => `merch/derived/${hash}/rembg-v1.png`;
 
 export type PrintFileResult = {
   buffer: Buffer;
@@ -45,14 +52,27 @@ const sha = (b: Buffer) => crypto.createHash("sha256").update(b).digest("hex").s
 /**
  * rembg, cached by image hash. The cache is what makes cutout output deterministic —
  * a network call is not. It also means a customer ordering three square products
- * pays for one mask.
+ * pays for one mask. Local disk first (fast), then S3 (shared across instances and
+ * deploys), then a fresh call that fills both.
  */
 const cutoutCached = async (input: Buffer, notes: string[]): Promise<Buffer> => {
   fs.mkdirSync(CACHE_DIR, { recursive: true });
-  const cached = path.join(CACHE_DIR, `${sha(input)}-rembg.png`);
+  const hash = sha(input);
+  const cached = path.join(CACHE_DIR, `${hash}-rembg.png`);
   if (fs.existsSync(cached)) {
     notes.push("rembg: cache hit");
     return fs.readFileSync(cached);
+  }
+  try {
+    const shared = await getObjectFromS3(derivedKey(hash));
+    if (shared) {
+      fs.writeFileSync(cached, shared);
+      notes.push("rembg: S3 cache hit");
+      return shared;
+    }
+  } catch (e) {
+    // A read failure must not block an order; the worst case is one extra rembg call.
+    notes.push(`rembg: S3 cache read failed (${(e as Error).name}), calling fresh`);
   }
   const blob = new Blob([new Uint8Array(input)], { type: "image/png" });
   const url = await fal.storage.upload(blob as unknown as File);
@@ -61,7 +81,8 @@ const cutoutCached = async (input: Buffer, notes: string[]): Promise<Buffer> => 
   if (!res.ok) throw new Error(`rembg download failed ${res.status}`);
   const buf = Buffer.from(await res.arrayBuffer());
   fs.writeFileSync(cached, buf);
-  notes.push("rembg: fresh call, cached");
+  const stored = await uploadFileToS3({ Key: derivedKey(hash), buffer: buf, fileType: "image/png" });
+  notes.push(stored ? "rembg: fresh call, cached locally and in S3" : "rembg: fresh call, cached locally (S3 write failed)");
   return buf;
 };
 
@@ -119,11 +140,27 @@ const cropWindow = (
   return { left, top, width: w, height: h };
 };
 
-export const buildPrintFile = async (
+/**
+ * Everything that decides WHICH pixels print: treatment, subject box, crop window.
+ * The print file and the shop preview both render from one plan, so a preview can
+ * never show a different crop or cutout than the order will print.
+ */
+export type PrintPlan = {
+  product: PrintProduct;
+  treatment: Treatment;
+  /** Source after treatment (cutout applied), before any crop. */
+  working: Buffer;
+  win: { left: number; top: number; width: number; height: number };
+  size: ReturnType<typeof outputSize>;
+  subjectBbox: PrintFileResult["subjectBbox"];
+  notes: string[];
+};
+
+export const planPrintFile = async (
   input: Buffer,
   productKey: string,
   treatment: Treatment = "panel",
-): Promise<PrintFileResult> => {
+): Promise<PrintPlan> => {
   const product = PRINT_PRODUCTS[productKey];
   if (!product) {
     throw new Error(
@@ -159,10 +196,25 @@ export const buildPrintFile = async (
   const srcW = meta.width ?? 0, srcH = meta.height ?? 0;
   const win = cropWindow(srcW, srcH, productAspect(product), subjectBbox);
 
+  return { product, treatment, working, win, size, subjectBbox, notes };
+};
+
+/** Crop to the plan's window, then one Lanczos pass to the requested size. */
+const renderAt = (plan: PrintPlan, width: number, height: number) =>
+  sharp(plan.working)
+    .extract(plan.win)
+    .resize(width, height, { kernel: "lanczos3", fit: "fill" });
+
+export const buildPrintFile = async (
+  input: Buffer,
+  productKey: string,
+  treatment: Treatment = "panel",
+): Promise<PrintFileResult> => {
+  const plan = await planPrintFile(input, productKey, treatment);
+  const { product, size, subjectBbox, notes } = plan;
+
   // 4. One Lanczos pass to final visible size.
-  let pipeline = sharp(working)
-    .extract(win)
-    .resize(size.visibleW, size.visibleH, { kernel: "lanczos3", fit: "fill" });
+  let pipeline = renderAt(plan, size.visibleW, size.visibleH);
 
   // 5. Mirrored bleed for gallery wrap, so the wrap never shows a raw edge.
   if (size.bleedPx > 0) {
@@ -192,4 +244,21 @@ export const buildPrintFile = async (
     subjectBbox,
     notes,
   };
+};
+
+/**
+ * Small copy of exactly what prints, for the shop's product mockups. Same plan, same
+ * crop, same cutout as the print file; only the size differs. Visible area only — the
+ * canvas wrap bleed is not part of what the customer sees on the front.
+ */
+export const renderPreview = async (plan: PrintPlan, maxEdge = 800) => {
+  const { visibleW, visibleH } = plan.size;
+  const scale = Math.min(1, maxEdge / Math.max(visibleW, visibleH));
+  const width = Math.round(visibleW * scale), height = Math.round(visibleH * scale);
+  const format: "png" | "jpeg" = plan.treatment === "cutout" ? "png" : "jpeg";
+  const pipeline = renderAt(plan, width, height);
+  const buffer = format === "png"
+    ? await pipeline.png({ compressionLevel: 9 }).toBuffer()
+    : await pipeline.jpeg({ quality: 88 }).toBuffer();
+  return { buffer, width, height, format };
 };
