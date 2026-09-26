@@ -45,15 +45,16 @@ export const PRINT_PRODUCTS: Record<string, PrintProduct> = {
   // resolution warning, despite Printful's stated 300 DPI recommendation for
   // canvas. Their hard floor is 150.
   //
-  // UNRESOLVED RISK — verify on the first physical canvas order before selling any:
-  // if Printful applies its OWN gallery wrap on top of our pre-mirrored bleed, the
-  // printed visible face loses an extra 1.5in on every edge. A mockup cannot show
-  // this; it renders from the same file whether or not they wrap it again. If the
-  // first real canvas comes back cropped tighter than the mockup, set bleedIn to 0
-  // and output the flat 3200x4000 instead.
+  // WRAP IS 3in PER SIDE, NOT 1.5 (measured 2026-09-26). Printful's canvas 16x20 printfile
+  // is 6600x7800 @300 = 22x26in with fill=cover: the 16x20 face plus 3in per side for the
+  // wrap. Our old 19x23in file (1.5in bleed) was scaled up 1.158x to cover it, pushing
+  // ~6.8% of the art off each edge of the face. A dot-grid mockup through Printful showed
+  // exactly the predicted 11 of 13 columns and 14 of 16 rows on the face. With 3in of
+  // mirrored bleed the file IS 22x26in, Printful doesn't scale it, and the face shows the
+  // intended 16x20. 4400x5200 @200 DPI.
   canvas_16x20: {
     key: "canvas_16x20", label: '16x20" gallery-wrap canvas',
-    widthIn: 16, heightIn: 20, dpi: 200, bleedIn: 1.5, defaultTreatment: "panel",
+    widthIn: 16, heightIn: 20, dpi: 200, bleedIn: 3, defaultTreatment: "panel",
   },
   // Printful's Cork-Back Coaster (catalog product 611, variant 15662) is
   // 3.74in x 3.74in exactly, per the live catalog on 2026-09-23. Not 4x4, and not
