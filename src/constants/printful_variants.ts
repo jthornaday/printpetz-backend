@@ -66,3 +66,31 @@ export const variantForProduct = (productKey: string): PrintfulVariant => {
   }
   return v;
 };
+
+/**
+ * Shopify variant id -> Printful catalog variant id.
+ *
+ * The SIZE a customer paid for lives on the Shopify line item's `variant_id`, not in
+ * our `_product_key` attribute (which picks the print-file spec and is the same for
+ * every mug size). Before this map existed, every mug printed as 11 oz and every can
+ * cooler as Regular — proven by a real order on 2026-09-26: 20 oz ordered, 11 oz sent.
+ *
+ * Shopify ids pulled from the Storefront API 2026-09-23. A new Shopify variant that is
+ * not listed here falls back to the product key's default variant and logs a warning.
+ */
+export const SHOPIFY_VARIANT_TO_PRINTFUL: Record<string, { printfulVariantId: number; label: string }> = {
+  "50526265999618": { printfulVariantId: 1320,  label: "Mug 11 oz" },
+  "50526266032386": { printfulVariantId: 4830,  label: "Mug 15 oz" },
+  "50526266065154": { printfulVariantId: 16586, label: "Mug 20 oz" },
+  "50526390026498": { printfulVariantId: 4463,  label: "Poster 8x10" },
+  "50526391402754": { printfulVariantId: 4651,  label: "Framed poster 8x10, black" },
+  "50526379507970": { printfulVariantId: 6,     label: "Canvas 16x20" },
+  "50526403592450": { printfulVariantId: 15662, label: "Cork-back coaster" },
+  "50526510252290": { printfulVariantId: 19461, label: "Can cooler, regular 12 oz" },
+  "50526510285058": { printfulVariantId: 19462, label: "Can cooler, slim 12 oz" },
+  "50526365614338": { printfulVariantId: 4532,  label: "Pillow 18x18" },
+  "50526392549634": { printfulVariantId: 16359, label: "Shaker pint glass 16 oz" },
+};
+
+export const printfulVariantForShopify = (shopifyVariantId: unknown) =>
+  shopifyVariantId == null ? null : SHOPIFY_VARIANT_TO_PRINTFUL[String(shopifyVariantId)] ?? null;

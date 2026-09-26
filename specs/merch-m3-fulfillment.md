@@ -148,3 +148,34 @@ expected — ask before editing it.
 Read specs/merch-m3-fulfillment.md and execute it. Follow the House rules exactly.
 Read specs/merch-parent.md first for what is already settled. Orders must be created
 as DRAFTS unless PRINTFUL_AUTO_CONFIRM=true — nothing prints by accident.
+
+
+## Hardening — 2026-09-26, after the first real order
+The first real end-to-end order (Shopify 7530534600962 → Printful draft 178113067) passed,
+and exposed or confirmed four problems, fixed together:
+
+1. **Size.** The SIZE a customer paid for is the Shopify line item's `variant_id`; our
+   `_product_key` only picks the print-file spec and is identical for every mug size.
+   `SHOPIFY_VARIANT_TO_PRINTFUL` in `src/constants/printful_variants.ts` maps each Shopify
+   variant to its Printful variant. Unmapped variants fall back to the product default and
+   log a warning. The real order had sent a 20 oz purchase to Printful as 11 oz.
+2. **Reply before working.** Shopify waits 5 s. The webhook now verifies, validates, answers
+   200, and only then builds the file and creates the Printful order. Measured: 30 ms reply,
+   sent before the Printful order existed. Trade-off: Shopify no longer retries a failure
+   AFTER the reply, so those are logged as `SHOPIFY_FULFILLMENT_FAILED` with the full request
+   for a manual `replay-order`.
+3. **Unfulfillable orders answer 200.** No PrintPetz items, no address, half-specified lines:
+   retrying can never fix these, and Shopify deletes a webhook subscription after 8 failed
+   retries, which would silently stop every later order reaching Printful. They are logged as
+   `SHOPIFY_ORDER_UNFULFILLABLE` — and each one may be a customer who paid and got nothing,
+   so it needs a human. Prevent them at the source by keeping products off the Online Store
+   channel.
+4. **Test orders never print.** Shopify's `order.test` sets `forceDraft`, which overrides
+   `PRINTFUL_AUTO_CONFIRM=true`. Verified with Printful intercepted: auto-confirm on + test
+   order stays a draft; auto-confirm on + real order confirms.
+
+`replay-order` now parses orders with the webhook's own `fulfillmentFromShopifyOrder`, so a
+replay exercises exactly what production does, size mapping included.
+
+Unverified: whether Printful's 15 oz and 20 oz mugs place the 2400x3000 side-panel file as
+well as the 11 oz does. Check the first physical order of each size.
