@@ -1,4 +1,4 @@
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
 
 import AppConstants from "@/constants/app_constants";
@@ -16,6 +16,17 @@ const s3 = new S3Client({
 });
 
 const Bucket = AppConstants.awsBucketName;
+
+/** Read an object back from our bucket. `null` when it doesn't exist; anything else throws. */
+export const getObjectFromS3 = async (Key: string): Promise<Buffer | null> => {
+  try {
+    const res = await s3.send(new GetObjectCommand({ Bucket, Key }));
+    return res.Body ? Buffer.from(await res.Body.transformToByteArray()) : null;
+  } catch (err) {
+    if ((err as { name?: string }).name === "NoSuchKey") return null;
+    throw err;
+  }
+};
 
 export const uploadFileToS3 = async (input: IS3FileUploadProps) => {
   const { Key, buffer, fileType } = input;
