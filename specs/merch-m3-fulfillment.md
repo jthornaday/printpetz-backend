@@ -179,3 +179,28 @@ replay exercises exactly what production does, size mapping included.
 
 Unverified: whether Printful's 15 oz and 20 oz mugs place the 2400x3000 side-panel file as
 well as the 11 oz does. Check the first physical order of each size.
+
+### 5. Only print our own images
+
+`_generation_url` comes from the customer's browser, so the webhook printed whatever
+address the cart carried. It now accepts only `https://<our CloudFront>/generations/…`
+(`isOurGenerationUrl`). Anything else is an `UnfulfillableOrderError`: 200 to Shopify,
+logged as `SHOPIFY_ORDER_UNFULFILLABLE`, nothing sent to Printful. Tested against
+look-alike hosts, other folders on our CDN (training photos, print files), path
+traversal, http, and garbage.
+
+Still open: it does not check that the generation belongs to the person paying. That
+needs the order to carry the user id; low risk (they'd be paying to print someone
+else's pet art from a URL they'd have to obtain), so deferred.
+
+### 6. Pillow and can cooler match Printful's real spec (found in shop M4.0)
+
+- **Pillow orders were all rejected.** Printful product 83 requires `stitch_color`; we sent
+  none → 400. Now sent from `PRINTFUL_VARIANTS.pillow_18x18.options` (white). Verified with
+  a draft through `createFulfillmentOrder` (178117795, cancelled).
+- **Regular can cooler** print file is now Printful's own 1260x1528 (was a 3.5x4in estimate
+  that lost ~6% of the width to Printful's `cover` crop).
+- **Slim can cooler is not sold** (hidden in the frontend): its print area is 1076x2085, and our
+  file would lose ~41% of its width. Needs its own print spec before it comes back.
+- Still unverified until a physical order: whether the pillow and cooler BACK is blank (we send
+  one file, Printful records it as `default`).

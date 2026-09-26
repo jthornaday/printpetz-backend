@@ -167,11 +167,15 @@ export const createFulfillmentOrder = async (req: FulfillmentRequest) => {
   const body = {
     external_id: req.externalId,
     recipient: req.recipient,
-    items: prepared.map(({ item, url }) => ({
-      variant_id: item.printfulVariantId ?? variantForProduct(item.productKey).variantId,
-      quantity: item.quantity,
-      files: [{ url }],
-    })),
+    items: prepared.map(({ item, url }) => {
+      const { options } = variantForProduct(item.productKey);
+      return {
+        variant_id: item.printfulVariantId ?? variantForProduct(item.productKey).variantId,
+        quantity: item.quantity,
+        files: [{ url }],
+        ...(options ? { options } : {}),
+      };
+    }),
   };
 
   const confirm = autoConfirm() && !req.forceDraft;

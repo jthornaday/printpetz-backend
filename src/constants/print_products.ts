@@ -75,9 +75,13 @@ export const PRINT_PRODUCTS: Record<string, PrintProduct> = {
   // Renamed from "koozie" 2026-09-23 to match the Shopify product. "Koozie" is a
   // trademark (Koozie Group); Printful lists it as "Can Cooler", which is why it
   // could not be found by that name. Catalog product 764.
+  // Size is Printful's own printfile for the REGULAR variant (19461): 1260x1528 @300,
+  // fill=cover (read from /mockup-generator/printfiles/764, 2026-09-26). The old 3.5x4
+  // estimate lost ~6% of the width to Printful's crop. Slim (19462) is 1076x2085 —
+  // a different shape entirely — and is not sold until it has its own row.
   can_cooler: {
     key: "can_cooler", label: "Can cooler",
-    widthIn: 3.5, heightIn: 4, dpi: 300, bleedIn: 0, defaultTreatment: "panel",
+    widthIn: 4.2, heightIn: 5.0933, dpi: 300, bleedIn: 0, defaultTreatment: "panel",
   },
   // Shaker Pint Glass, catalog 653 / variant 16359. Real spec from Printful's File
   // guidelines, 2026-09-23: print file 9.58in x 5.04in @300 DPI = 2874x1512.

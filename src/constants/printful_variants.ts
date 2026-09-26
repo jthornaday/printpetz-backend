@@ -15,6 +15,8 @@ export type PrintfulVariant = {
   label: string;
   /** Base cost in USD when looked up. Reference only, not authoritative. */
   priceUsdAtLookup: number;
+  /** Product options Printful REQUIRES on every order line, or it rejects the order. */
+  options?: Array<{ id: string; value: string }>;
 };
 
 export const PRINTFUL_VARIANTS: Record<string, PrintfulVariant> = {
@@ -53,6 +55,9 @@ export const PRINTFUL_VARIANTS: Record<string, PrintfulVariant> = {
   pillow_18x18: {
     variantId: 4532, productId: 83,
     label: 'All-Over Print Basic Pillow — 18″×18″', priceUsdAtLookup: 16.60,
+    // Required by Printful ("Zipper & Stitch color": white | black). Without it every
+    // pillow order is rejected with a 400 — reproduced with a draft order 2026-09-26.
+    options: [{ id: "stitch_color", value: "white" }],
   },
 };
 

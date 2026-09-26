@@ -11,7 +11,8 @@
     "dev": "nodemon lib/index.js",
     "upscale-eval": "node -r module-alias/register lib/scripts/upscale-eval.js",
     "print-file": "node -r module-alias/register lib/scripts/print-file.js",
-    "replay-order": "node -r module-alias/register lib/scripts/replay-order.js"
+    "replay-order": "node -r module-alias/register lib/scripts/replay-order.js",
+    "merch-demo": "node -r module-alias/register lib/scripts/merch-demo.js"
   },
   "keywords": [
     "Pet",

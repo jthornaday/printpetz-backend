@@ -13,6 +13,7 @@ import { Request, Response } from "express";
 
 import { Treatment } from "@/constants/print_products";
 import { printfulVariantForShopify } from "@/constants/printful_variants";
+import AppConstants from "@/constants/app_constants";
 import {
   createFulfillmentOrder, FulfillmentItem, FulfillmentRequest, PrintfulRecipient,
 } from "@/services/printful_service";
@@ -36,6 +37,21 @@ export const verifyShopifyHmac = (rawBody: string, header: string | undefined): 
   const a = Buffer.from(digest);
   const b = Buffer.from(header);
   return a.length === b.length && crypto.timingSafeEqual(a, b);
+};
+
+/**
+ * The cart is built in the customer's browser, so `_generation_url` is whatever they
+ * sent. Only print images that live in our own generations folder on our CDN —
+ * otherwise anyone could pay to have any picture printed under the PrintPetz name.
+ */
+const GENERATIONS_ORIGIN = new URL(AppConstants.cloudfrontDomain).origin;
+export const isOurGenerationUrl = (raw: string): boolean => {
+  try {
+    const u = new URL(raw);
+    return u.origin === GENERATIONS_ORIGIN && u.pathname.startsWith("/generations/");
+  } catch {
+    return false;
+  }
 };
 
 const propOf = (li: any, name: string): string | undefined =>
@@ -73,6 +89,9 @@ export const fulfillmentFromShopifyOrder = (order: any): FulfillmentRequest => {
     if (!sourceImageUrl && !productKey) continue;
     if (!sourceImageUrl) throw new UnfulfillableOrderError(`line item ${i} has product_key but no generation_url`);
     if (!productKey) throw new UnfulfillableOrderError(`line item ${i} has generation_url but no product_key`);
+    if (!isOurGenerationUrl(sourceImageUrl)) {
+      throw new UnfulfillableOrderError(`line item ${i} generation_url is not a PrintPetz generation: ${sourceImageUrl}`);
+    }
     // The size the customer PAID for is the Shopify variant, not our product key.
     const mapped = printfulVariantForShopify(li.variant_id);
     if (!mapped) {
