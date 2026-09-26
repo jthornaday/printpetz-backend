@@ -192,3 +192,15 @@ traversal, http, and garbage.
 Still open: it does not check that the generation belongs to the person paying. That
 needs the order to carry the user id; low risk (they'd be paying to print someone
 else's pet art from a URL they'd have to obtain), so deferred.
+
+### 6. Pillow and can cooler match Printful's real spec (found in shop M4.0)
+
+- **Pillow orders were all rejected.** Printful product 83 requires `stitch_color`; we sent
+  none → 400. Now sent from `PRINTFUL_VARIANTS.pillow_18x18.options` (white). Verified with
+  a draft through `createFulfillmentOrder` (178117795, cancelled).
+- **Regular can cooler** print file is now Printful's own 1260x1528 (was a 3.5x4in estimate
+  that lost ~6% of the width to Printful's `cover` crop).
+- **Slim can cooler is not sold** (hidden in the frontend): its print area is 1076x2085, and our
+  file would lose ~41% of its width. Needs its own print spec before it comes back.
+- Still unverified until a physical order: whether the pillow and cooler BACK is blank (we send
+  one file, Printful records it as `default`).
