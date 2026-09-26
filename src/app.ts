@@ -13,6 +13,7 @@ import publicRoutes from "@/router/public_router";
 import stripeRoutes from "@/router/stripe_routes";
 import webhookRoutes from "@/router/webhook_routes";
 import shopifyRoutes from "@/router/shopify_routes";
+import merchRoutes from "@/router/merch_router";
 
 import { verifyToken } from "./middleware/verify_token";
 
@@ -68,6 +69,7 @@ app.use("/file", verifyToken, fileRoutes);
 app.use("/model", verifyToken, modelRoutes);
 app.use("/generation", verifyToken, generationRoutes);
 app.use("/stripe", verifyToken, stripeRoutes);
+app.use("/merch", verifyToken, merchRoutes);
 
 // PRIVATE ROUTES END //
 
