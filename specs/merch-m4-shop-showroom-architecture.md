@@ -397,3 +397,356 @@ orders the profitable ones.
 Secondary, can be decided during M4.3: blank photo source (Printful templates vs
 our own sample photos), and whether the treatment toggle defaults to Full scene on
 every product (current default) or per product.
+
+---
+
+## Decision 1 revisited (2026-09-26)
+
+Written by `architect` after M4.1 (#54), M4.2 (#55) and the UV-calibration experiment
+(`Claude outputs/m4-measure/uv/`). This replaces the Decision 1 recommendation above.
+Where they conflict, this section wins.
+
+### What changed
+
+1. **The CSS plan has no input.** It needed blank product photos plus hand-made quad
+   templates. Printful's `mockup-templates` are flat design-tool guides, and the repo
+   has no blank photos. Our own photography is weeks away.
+2. **A Printful white render is a blank product photo.** Printful renders a plain-white
+   print file through its real photo style (mug style 10423 "Front view") and returns
+   the product with real lighting on a transparent background. That's the missing
+   input, and it comes from the same renderer Printful uses for its own mockups.
+3. **Curvature can't be done in CSS.** `matrix3d` is a flat perspective transform. A mug
+   or can cooler needs a per-pixel warp. The experiment does that warp server-side in
+   ~70-100 ms, and George/Wizard on the 11 oz mug look photoreal (`mug11-sheet2.jpg`).
+4. **Printful at runtime is ruled out by measurement:** 2 tasks/min account-wide, ~33 s
+   per task, one product per task.
+
+### The framing mismatch: likely cause (engineer to confirm)
+
+I read the calibration renders directly (`mug11-uv.png`, `mug11-white.png`). The
+geometry of the print area is right: our rectangle edges land where Printful's do in
+`check-george-side.jpg`. What's wrong is the **decoded position inside the
+rectangle**:
+
+| Where on the mug face | True coordinate | Decoded (UV ÷ white) |
+|---|---|---|
+| Left edge of print, middle row | u = 0 | **u = 0.13** |
+| Right edge of print, middle row | u = 1 | ~0.78-0.85 |
+| Top edge, middle column | v = 0 | **v = 0.10** |
+| Bottom edge | v = 1 | v = 0.96 |
+
+The raw pixel at the left edge is `(31,131,31)` against white `238`. The input there
+was `(0,128,0)`. So Printful's renderer **lifts blacks** (0 becomes ~13% of white),
+**compresses saturated red** (at the right edge, 255 comes back as 78% of white), and
+**bleeds between channels** (blue is 31 where we sent 0). That's a print-simulation
+colour transform. It's reasonable for a mockup, but it destroys a colour-coded
+position. The decoded range is squeezed to about 0.13-0.8, so our composite shows only
+the middle of the art stretched over the whole print area. The pet looks **larger**,
+and because the top loses more than the bottom (0.10 against 0.04) it also looks
+**higher**. That's exactly the symptom.
+
+This also explains the other results:
+- **Re-calibrating at print-file size/DPI changed nothing.** The error is in colour,
+  not geometry. `mug11-300-*` decodes to the same numbers.
+- **The 39/255 mean diff** mixes this geometry error with a real tone difference: we
+  keep the file's blacks, Printful lifts them. It shouldn't be used as the gate (see
+  Q3).
+
+**The fix is to stop encoding position in colour.** Encode it in **binary black/white
+patterns** (Gray-code stripes). Each pixel is read as "brighter or darker than halfway
+between the black and white renders". That comparison survives any tone curve, any
+lifted black and any channel crosstalk, because neutral black and white don't get
+gamut-mapped. This is standard structured-light calibration. It also answers Q2's
+"geometric calibration" option, so Q1 and Q2 collapse into one path.
+
+A quicker patch (subtract a black render, linearise with a grey step wedge) would
+remove the lifted black. It would not reliably remove the hue-dependent red
+compression. I don't recommend spending time on it.
+
+### Q1. Switch Decision 1? Yes.
+
+**New Decision 1: server-side composites. Each product photo is a Printful white
+render. The warp comes from a Gray-code calibration of that same Printful view, and
+the art composited is the M4.2 flat preview (the real print plan).** Printful is used
+offline only, a few dozen renders per product view, ever.
+
+What survives from the original decision:
+- The art is still the **real print plan** (`planPrintFile` → `renderPreview`), so
+  crop, cutout and de-halo are the print's code path. No AI touches it, so identity is
+  safe by construction.
+- Both composite rules still apply, now in the backend compositor. (1) Transparent art
+  shows the product surface (cutout = pet on white mug, never the page). (2) Shading
+  multiplies but can't recolour: shade = white-render luminance, applied the same to
+  every channel, so hue is preserved.
+- The **"Exact print" view** (the flat preview, captioned "This is exactly what we
+  print") stays mandatory on the product page.
+
+What's dropped: `merch_templates.ts`, the `ProductMockup` quad/CSS component, frontend
+blank photos, and the `/shop/lab` calibration page. The frontend just shows an `<img>`.
+Calibration becomes an automatic numeric check (Q3) instead of eyeballing in a lab page.
+
+**Where composites fit in M4.2:**
+
+- **When:** render eagerly in the existing background job, straight after each entry's
+  flat preview is ready. The flat is already in memory, and a composite is ~100 ms, so
+  there's nothing to gain from an on-demand endpoint and it would add a second latency
+  path. The synchronous first response still renders **flats only**, so it stays at
+  ~0.9 s. Composites always arrive via polling.
+- **Event loop:** the warp is a synchronous JS pixel loop. 100 ms blocks per composite ×
+  ~20 per image would stall other API requests on that instance. Two cheap
+  mitigations, in order:
+  1. Precompute each view's per-pixel source index + bilinear weights once at load, so
+     the hot loop is a gather-and-multiply. That should be ~10-20 ms (estimate, measure
+     it). Also `await setImmediate()` between composites.
+  2. If event-loop lag p99 still exceeds ~50 ms under a test burst, move compositing to
+     one `worker_thread` before `SHOP_MODE=on`.
+- **Manifest shape:** each `PreviewEntry` keeps its flat `url`, which is the Exact
+  print, and gains
+  `mockups: [{ view, variantKey, status: "ready"|"pending"|"unavailable", url, url480, width, height, calibrationId }]`.
+  - `unavailable` means no accepted calibration for that view. The frontend then shows
+    the flat preview on the product's substrate colour, never a guessed composite.
+  - The grid uses the default variant's `front` view. The product page filters by the
+    selected variant (mug 11/15/20 oz look different).
+- **Format and size:** WebP with alpha (quality ~80, lossless alpha), cropped to the
+  product's opaque bbox plus a small margin, in two sizes: ~1000 px for the detail page
+  and 480 px for grid tiles. Measured on Printful's George mug render: **~44 KB** at
+  1000 px and **~22 KB** at 480 px (JPEG q85 would be 75/30 KB and lose the
+  transparency). About 20 tile images per grid ≈ 0.5 MB, which is fine. The transparent
+  background lets the page choose its own backdrop.
+- **Cache keys:**
+  - Composites live under the existing preview folder:
+    `merch/previews/{srcSha}/{version}/mockups/{productKey}-{treatment}-{view}-{variantKey}[-480].webp`.
+  - `version` becomes `${PREVIEW_VERSION}-${CAL_SET_HASH}`. `CAL_SET_HASH` is the first
+    8 hex characters of a sha256 over the committed calibration registry (see Q3).
+  - **So you never bump `PREVIEW_VERSION` for a calibration change.** Changing any
+    calibration changes the hash, which gives a fresh folder and manifest. Everything
+    re-renders on the next GET. Old files are orphaned for the lifecycle rule.
+  - The re-render is cheap: rembg masks stay cached under `merch/derived/`, so it's
+    milliseconds of sharp per flat plus the composites. No paid calls.
+  - `PREVIEW_VERSION` keeps its current meaning: bump it only when the plan/render
+    changes.
+  - The committed demo-pet manifest (`merch_demo.ts`) has to be regenerated with
+    `npm run merch-demo` after any calibration change. Put that in the calibrate
+    script's output as a reminder.
+- **Canvas bleed gotcha:** `renderPreview` drops the canvas wrap bleed
+  (`print_file_service.ts:252`), but Printful places the **print file**, bleed
+  included. A calibration maps photo pixels to print-file coordinates. The compositor
+  must convert them to preview coordinates
+  (`u_prev = (u·W_print − bleedPx) / (W_print − 2·bleedPx)`), or composite from a
+  bleed-inclusive render. The same applies to any future product whose print file isn't
+  the preview scaled up.
+- **Calibration validity guard:** each calibration records the print-file pixel size
+  and aspect it was measured with. Printful's cover/fit placement depends on the
+  aspect, so a calibration is only valid for that exact print-file shape. At load, any
+  calibration whose recorded size doesn't match the current `PRINT_PRODUCTS` spec is
+  treated as `unavailable` and logged. This matters now: can cooler regular and slim
+  are both due for print-spec corrections (M4.0 table).
+
+### Q2. If the mismatch isn't fixable quickly: fallbacks, in order
+
+"Every item shows the customer's chosen image" and "stay honest" together rule out one
+thing: a composite that puts the art somewhere it won't print. Each fallback keeps the
+art correct and gives up realism instead.
+
+1. **Gray-code calibration (above).** It's the primary fix, and also the answer if the
+   engineer finds a second cause on top of the colour one.
+   - Cost per view: 7 bits per axis (finest stripe ≈ 3 px across a ~400 px print area
+     at Printful's 1000 px output) + white + black = **16 renders ≈ 8 min** at 2/min,
+     once.
+   - Sub-stripe precision comes from fitting a smooth map through the stripe
+     transitions. Keep the existing cubic fit if its residual passes Q3. Otherwise use a
+     thin-plate/bicubic spline, stored as a dense map.
+2. **Parametric models from the print-area boundary.** Use this if Printful renders
+   turn out non-deterministic, or stripes don't resolve on some product (pillow seams,
+   can-cooler texture).
+   - The boundary (white render vs black render) is already correct today.
+   - Fit a **homography** for flat fronts (poster, framed, canvas front, coaster).
+   - Fit a **cylinder model** for mug and can cooler: axis, radius and panel angle are
+     fitted to the two vertical edges and the top/bottom ellipse arcs. The panel's
+     angular extent is known from print-area inches ÷ circumference.
+   - The pillow gets a homography plus mild radial bulge, or stays flat-only (step 3).
+   - This is less exact at the edges but has no colour dependence at all. It's gated by
+     the same Q3 threshold.
+3. **Per-view honest degrade.** Any view that fails Q3 ships as `unavailable`. Its tile
+   shows the **flat Exact print on the product's substrate colour**, next to the white
+   render of the blank product at the same scale ("Your design" / "On this product").
+   The customer still sees their own image on every item, and nothing claims more
+   than we know. **Launch isn't blocked by the hardest product.**
+4. **Printful real mockup on the product page, async.** Keep it as an optional "See a
+   photo proof" button, not a fallback the grid depends on.
+   - At 2/min account-wide and ~33 s per task, it needs a global queue, a webhook or
+     poller, a copy to S3, and a permanent cache per (srcSha, product, treatment,
+     variant).
+   - Worth revisiting only after $10 of fulfilled orders lifts the limit to 10/min.
+     Park it as M4.9.
+
+### Q3. Calibration assets: storage, regeneration, automatic acceptance
+
+**Storage: S3, content-addressed. A small registry committed to the repo.**
+
+- **Raw Printful renders** (the Gray-code stack, white, black, acceptance chart):
+  `merch/calibration/raw/{viewId}/{runId}/…`. About 4 MB per view, kept for audit and
+  never read at runtime.
+- **Runtime assets** per calibration:
+  `merch/calibration/{calibrationId}/photo.png` (white render, RGBA) and `map.png`
+  (16-bit: R = u, G = v, B = coverage). `calibrationId = {viewId}-{sha8(photo+map)}`.
+  Roughly 0.5-2 MB per view, ~10 views (estimate).
+- **Registry**, committed at `src/constants/merch_calibrations.json`. One row per view:
+  - `viewId`, `productKey`, `variantKey`, Printful `product/variant/placement/technique/styleId`
+  - the print-file W×H the calibration was measured with
+  - `calibrationId`, sha256 of both assets
+  - acceptance scores, `accepted: true|false`, date
+  - `CAL_SET_HASH` = sha over this file.
+- **Why not assets in git:** ~15-20 MB of binaries that get replaced on every
+  recalibration would bloat both repos' history and the EB zip.
+  - The registry pins exact hashes, so code and calibration still version together. The
+    loader checks the sha after download and marks the view `unavailable` on a mismatch.
+  - Runtime loads each view once from S3 (the bucket is already used for rembg), keeps
+    it in memory (~5 MB per view; the photo can be cropped to the bbox), and keeps a
+    local-disk L1 like the rembg cache.
+  - Tradeoff: local dev needs AWS credentials. It already does for rembg.
+
+**Regeneration: `npm run merch-calibrate -- <viewId>|all [--check-only]`**
+(`src/scripts/merch-calibrate.ts`). It **uses the Printful API key**, so Jake runs it or
+approves it, like M4.0.
+1. Build the pattern stack at the **exact print-file pixel size and aspect from
+   `PRINT_PRODUCTS`**: Gray code (7+7), white, black, plus one acceptance chart. Upload
+   to `raw/`.
+2. Submit tasks one at a time, honouring `x-ratelimit-*`: sleep until the reset rather
+   than retrying into a 429. Include required product options (pillow `stitch_color`).
+   - **Worth testing first:** one task with several `mockup_style_ids` for the *same*
+     product may return all views at once. That would cut total time proportionally.
+     M4.0 only tested several *products*.
+3. Decode, fit and write the dense map. Composite the acceptance chart through it and
+   score it against Printful's render of the same chart (below).
+4. Print a report and write comparison sheets to `Claude outputs/merch-calibration/`:
+   ours | Printful | difference, for the chart plus George panel and Wizard cutout.
+   Upload the runtime assets. Rewrite the view's registry row. **The registry diff is
+   the review artifact in the PR.**
+5. Print the reminder: re-run `npm run merch-demo` and update `merch_demo.ts`.
+
+Time: ~8 min per view plus ~2 min of checks. About 10 views ≈ 1.5-2 h wall-clock, once.
+Recalibrate only when a print spec changes (the guard in Q1 flags it) or Printful
+changes a photo style.
+
+**Automatic acceptance: numeric, and blind to tone.** Mean pixel difference is the
+wrong gate: it mixes geometry with Printful's print-simulation colour. The gate
+measures **where things land**:
+
+- **Chart:** a high-texture test image (fine checker plus numbered crosshairs) at the
+  exact print-file size. It's rendered by Printful as a real print file (the reference)
+  and by us through the calibration.
+- **Local shift:** split the print area into 32×32 px tiles at Printful's 1000 px
+  output. For each tile with enough texture, find the shift (±8 px search) that
+  maximises **normalised cross-correlation** between ours and the reference. NCC
+  ignores brightness and contrast, so lifted blacks don't count against us.
+- **Pass if all three hold:**
+  - **p95 tile shift ≤ 1.5 px and max ≤ 3 px** at 1000 px output. That's under 1% of a
+    ~400 px mug print area, below what a customer can see.
+  - **Coverage IoU ≥ 0.98** between our print-area mask and Printful's (white vs black
+    render).
+  - The same shift test on **George panel and Wizard cutout** reference renders, with
+    thresholds 1.5 px / 3 px on textured tiles. This proves the real print-file path,
+    not just the chart.
+- **Report only, not gated:** mean absolute difference inside the print area after
+  matching Printful's neutral tone curve (measured from the black/white renders). That
+  keeps colour drift visible without failing a view for it.
+- Today's mug calibration would fail the shift test by a wide margin. The squeeze is
+  ~13% of the print width, roughly 50 px. The test does catch the problem we have.
+
+A view that fails is written to the registry with `accepted: false` and ships as
+`unavailable` (Q2 step 3). Nothing unaccepted ever reaches a customer.
+
+**Open question for Jake (not blocking):** should composites copy Printful's print
+simulation (lifted blacks), or show the file's true blacks as now? Printful's version
+may be more honest about sublimation on ceramic. Ours flatters Wizard's black coat.
+Recommendation: keep true blacks, record the tone curve anyway, and decide when the
+first physical mug arrives, with Wizard as the test.
+
+### Q4. Revised milestones (M4.3 onward)
+
+| # | Repo | What | Done when | Blocked by |
+|---|---|---|---|---|
+| **M4.3a** | backend | `merch-calibrate` script (Gray code, runner, decode/fit, acceptance, registry) + 11 oz mug front. | Mug 11 oz passes Q3 on chart + George + Wizard. The sheet matches Printful by eye too. **Printful key: Jake runs/approves.** | engineer confirms the colour diagnosis (or the second cause is known) |
+| **M4.3b** | backend | Calibrate the rest: poster, framed, canvas **front only**, coaster, pillow (stitch_color white), can cooler regular, mug 15/20 oz. | Every view is `accepted: true`, or `false` with a written reason. | M4.3a. Slim cooler waits for its print-spec fix; cooler regular recalibrates after its ~6% spec correction. |
+| **M4.3c** | backend | Compositor in the preview job: view loader + sha check + validity guard, precomputed lookup, WebP 1000/480, `mockups[]` in the manifest, `version = PREVIEW_VERSION-CAL_SET_HASH`, bleed conversion, `unavailable` path. Regenerate the demo. | 5 regression pets × 7 products × 2 treatments render. Event-loop lag measured under a burst of 5 new images. Per-image composite time recorded here. A deliberately corrupted registry sha makes that view `unavailable`, not an error. | M4.3a (can start in parallel with M4.3b) |
+| **M4.4** | frontend | New `/shop`: picker, treatment toggle, grid of composites (flat-on-substrate for `unavailable`), logged-out/empty states with demo pet, `trimmed` notice, prefix-match fix. **No templates, no lab page.** | As before. | M4.3c |
+| **M4.5** | frontend | `/shop/[product]`: large composite for the chosen variant, **Exact print** tab, sizes, Buy now. | As before. | M4.4 |
+| **M4.6** | frontend | Visibility (nav, auth-aware header, "Shop this image", FAQ). Jake flips `SHOP_MODE=on`. | As before. | M4.5 |
+| **M4.7** | frontend | Multi-item cart (decision C). | | M4.5 |
+| **M4.8** | frontend | Delete `OrderPrintDialog` / `AutoSmartMokup` / old Shop. **Needs Jake's go-ahead.** | | M4.6 stable |
+| **M4.9** | both | *Optional, later.* Async Printful photo proof on the product page. | Reconsider at 10/min. | $10 fulfilled |
+| side | backend | Slim can cooler print spec (41% cropped), cooler regular aspect, webhook hardening. | | independent. Slim cooler blocks its own calibration. |
+
+**Changes to earlier sections:**
+- Decision 3's "Blank product photos, templates → frontend `public/merch/templates`"
+  row is replaced by the S3 calibration assets + registry above.
+- Risk 2 ("a template misplaces the art") is now caught by the Q3 gate.
+- Risk 5 (licensing) now covers Printful-generated renders of products Printful
+  fulfils. That's the normal merchant use of their mockups, but confirm in their terms
+  before launch.
+- Decision **A** for Jake becomes: *approve server-side composites on Printful-rendered
+  blank photos, calibrated offline and gated by the numeric check, with per-view flat
+  fallback.*
+
+### Addendum (2026-09-26, architect): calibration method superseded
+
+The M4.3a prototype (`Claude outputs/m4-calib/`) replaced Gray code with a **dot grid
++ white + black renders (3 tasks per view, not 16)**. On the 11 oz mug it fits to
+0.09 px RMS, and it predicts dots left out of the fit to within 0.21 px. Where the
+sections above conflict with this, this wins:
+- **Method:** dot grid at the exact print-file size, placed in visible coordinates. Add
+  2-3 distinctive marker dots so dot identity doesn't depend on the four corner dots.
+  Flat views fit a homography. Mug, can cooler and pillow fit a polynomial.
+- **Runtime asset:** the fitted coefficients go in the registry row (committed). S3
+  holds only the white render, plus the black render if compositing uses
+  `K + (W-K)*art`. No dense `map.png`. The bleed conversion in Q1 doesn't apply,
+  because the u,v are already in visible/preview coordinates.
+- **Pin `styleId` per view in code.** Don't discover it at run time.
+- **Gate:** still the Q3 NCC tile-shift test. Mean-diff (`refs.cjs`) is report-only.
+  Add fit gates: all dots matched, or the unmatched ones sit in a documented
+  hidden region. RMS ≤ 0.3 px and max ≤ 1 px at 1000 px output.
+
+## M4.3a — photoreal mockups, built 2026-09-26
+
+**Method (what shipped):** per product, three Printful renders through one clean photo style, each at
+the product's exact print-file size: plain white (lighting + blank product photo), solid black (print
+coverage = lum(white) − lum(black)), and a 13×N dot grid at known positions (geometry). Colour-coded
+UV calibration was abandoned: Printful's colour pipeline mixes channels and lifts blacks (39/255 error).
+Dots are identified from the grid corners, then every dot is re-identified through the fitted map
+(degree ≤ 6 polynomial, x^a·y^b with a,b ≤ 5), with an edge guard against a one-column identity shift.
+
+- `npm run merch-calibrate -- [--render] --dir=<folder> <keys>` → `src/constants/merch_calibrations.json`
+  (committed: map coefficients, bbox, style id) + photo and mask PNGs in S3 (content-addressed).
+- **Printful caches remote files by URL.** Re-uploading a changed file to the same key made Printful
+  render the OLD file (pixel-identical output). All calibration uploads are content-addressed now.
+- `src/services/merch_mockup_service.ts`: map precomputed once per product (~1 s incl. asset download),
+  then 140–300 ms per mockup, 44–67 KB WebP with alpha.
+- The preview job adds `entry.mockup` for calibrated products after the flats; old manifests pick
+  mockups up on their next poll. `manifest.complete` tells the shop when to stop polling. A mockup
+  failure never removes the flat preview (`mockupFailed` stops retry loops).
+
+**Acceptance gate** (tile-shift NCC vs Printful's own mockup of the REAL print file, 40 px tiles,
+±6 px search, sub-pixel; skip flat tiles and 1-D-texture tiles — stripes can't measure shift along
+themselves): pass = 95% of tiles ≤ 1.5 px and none > 3 px, for all 5 regression pets.
+
+| Product | Style | Fit (dots, rms) | 5-pet gate, production path |
+|---|---|---|---|
+| Mug 11 oz | 10423 Front view | 208/208, 0.09 px | 5/5 PASS, worst tile 1.10 px |
+| Poster 8×10 | 9114 Transparent | 208/208, 0.02 px | 5/5 PASS, worst 0.75 px |
+| Framed 8×10 | 24615 Flat | 208/208, 0.03 px | 5/5 PASS, worst 0.74 px |
+| Coaster | 3006 Flat | 169/169, 0.35 px | 5/5 PASS, worst 1.49 px |
+| Canvas 16×20 | 9974 Wall | 208/208, 0.02 px (after the 3in-wrap fix, PR #57) | 5/5 PASS, worst 1.25 px |
+| Can cooler | 22029 Flat | **rejected**: 137/208 dots, 7 px rms — bottom ~20% of the art sits on the bottom tab | flat preview only |
+| Pillow 18×18 | 12675 Default | **rejected**: outer ring of dots lost in the seams | flat preview only |
+
+The gate itself was fixed once: Max on the coaster "failed" on one tile (outfield wall + grass,
+horizontal stripes) where shifts of 1 px and 6 px both correlated at 0.999. Visual check: Printful,
+prototype and production crops identical. Fix: skip tiles whose gradient structure tensor is
+one-directional (λmin/λmax < 0.15), then re-ran every product.
+
+**Coaster honesty note:** the physical coaster's rounded edge hides ~3% of the print per side. The
+mockup shows this; the flat "Exact print" view shows the whole file.
+
+**Open before launch:** can cooler and pillow — both lose part of the art on the physical product
+(bottom tab, seams). Needs the same print-spec investigation the canvas got.

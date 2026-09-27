@@ -12,7 +12,8 @@
     "upscale-eval": "node -r module-alias/register lib/scripts/upscale-eval.js",
     "print-file": "node -r module-alias/register lib/scripts/print-file.js",
     "replay-order": "node -r module-alias/register lib/scripts/replay-order.js",
-    "merch-demo": "node -r module-alias/register lib/scripts/merch-demo.js"
+    "merch-demo": "node -r module-alias/register lib/scripts/merch-demo.js",
+    "merch-calibrate": "node -r module-alias/register lib/scripts/merch-calibrate.js"
   },
   "keywords": [
     "Pet",

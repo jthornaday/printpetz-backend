@@ -436,3 +436,145 @@ Apparel, hats, the pint glass (needs wrap composition), pet products, gift cards
 discounts and bundles (the mug-with-wall-art bundle is a later growth test),
 in-app order history, the credit-refund messaging (until M4-credit-refund ships),
 international shipping copy.
+
+---
+
+## 11. Mockup fidelity bar (2026-09-26)
+
+Written by `studio-manager` after looking at the 11 oz mug composites in
+`Claude outputs/m4-measure/uv/` (and re-rendering them at full size locally with
+`calib.cjs`, no API calls). Answers "how true must a shop mockup be before we can
+sell from it?"
+
+### What I saw (evidence for the rules below)
+- **Our mug composite shows the art about 12-15% too big, and that crops the pet.**
+  Compared with Printful's own mockup of George's real print file
+  (`check-george-printful.png`), ours cuts off the top of the bat and pushes the
+  cap to the top edge. At full size, **Wizard's ear tips are cut off** and the cap
+  lettering touches the edge. Ear shape is on the never-change list, so this is
+  an identity fail, not just a cosmetic one. It's also the *flattering*
+  direction: the buyer sees a bigger pet than will arrive.
+- **Vertical streaks in the top-right corner** of the print area (the sky or
+  floodlight smeared into bars), on both George and Wizard. They're visible at
+  product-page size.
+- **The 500 px contact sheets hide defects.** `mug11-sheet2.jpg` looks clean. The
+  older 1000 px panels (`mug11-*-panel.jpg`, from `composite.cjs`) are badly
+  shattered and smeared: George's muzzle and name are unreadable, and the bottom
+  ~15% is streaks. The newer `calib.cjs` fit is clean at 1000 px apart from the
+  corner streaks. **Always judge at the largest size the shop displays.**
+- **Colour and curvature match Printful's well.** Wizard reads black. The shading
+  looks natural.
+- **Cut out drops body parts, not just props.** George loses his bat. Wizard loses
+  his **tail and black paws** (a black cat on dark dirt). That's 2 of 2 tested pets
+  failing, and it's an anatomy failure.
+
+### F1. What matters to a buyer, in order
+1. **Missing or extra pet parts at the crop edge** (ears, tail, paws, muzzle, the
+   display name, props). Tolerance: **zero.** Anything inside Printful's print
+   area must be inside ours, and nothing outside it may appear in ours.
+2. **Pet scale and position.** Tolerance: **scale within ±3%, offset within 2% of
+   the print area** (about 0.07 in on a mug). Anything flattering (bigger or more
+   centered than the print) counts as a fail even inside tolerance if it hides a
+   crop.
+3. **Coat colour.** Tolerance: the coat reads the same colour. Wizard's coat
+   brightness is within ±5 L\* of Printful's. Background colour drift is fine.
+4. **Curvature and shading.** Cosmetic. No numeric bar, unless it hides part of
+   the pet.
+5. **Render quality** at display size: no smear, streaks, shatter or halo, and the
+   display name is legible.
+
+### F2. Acceptance test, per product (run before any product shows a composite)
+Reference = **Printful's own mockup of the real print file**, until the physical
+samples (section 6) replace it.
+1. Pets: Wizard, Moses, George, Max, Darla, using one real generation each (the same
+   ones as the section 9 QA). Every treatment the product offers.
+2. Build the print file through the **order path** (not the preview path).
+3. Get Printful's mockup of that file on the **same `mockup_style_id`** as our
+   template. This is free. At about 33 s and 2/min, the 35 full-scene renders take
+   roughly 18 min. Cache them as test fixtures.
+4. Render our composite on the same style at the **largest display size**.
+5. **Automated check:** align ours to Printful's inside the print area (search
+   scale 0.8-1.2, shift ±10%). Report the best-fit scale, x/y offset and the mean
+   colour difference (ΔE) over the pet. Pass: scale 0.97-1.03, offset ≤2% on each
+   axis, pet ΔE ≤6. Tune the ΔE bar on Darla: **if Darla fails, the template is
+   wrong.**
+6. **Human check** (side by side at 1:1, pass or fail per pet): ears, tail, paws,
+   muzzle, name and props are all present exactly as in Printful's; there are no
+   streaks, smear or halo; the name is legible; the coat colour is the same.
+7. A product **passes only if all 5 pets pass steps 5 and 6.** Re-run after any
+   change to the template, calibration or print plan.
+
+### F3. What the shop shows until a product passes
+**Recommendation: the flat "Exact print" preview for that product, and no
+composite.** Don't show a composite with a caveat. A caveat doesn't un-crop
+Wizard's ears, and buyers don't read it. Don't use live Printful mockups either:
+33 s per image and 2/min means one person browsing 7 products uses 3.5 minutes of
+quota.
+- **Exception, and a cheap win:** logged-out visitors always see **Max**, and Max
+  never changes. So pre-render **Printful's real mockups of Max** once (free, a few
+  minutes) and use them for the logged-out showroom now.
+- Per product, the switch is a flag: a product shows the composite once it passes
+  F2. A flat preview is honest but weaker than the live on-product preview that
+  Zazzle and Shutterfly have trained buyers to expect (section 7). So fixing the
+  composite scale is the priority, not a nice-to-have.
+
+### F4. Cut out
+- **Not offered at launch.** It removes body parts on 2 of 2 pets tested, which
+  breaks the one standard. Bring it back only when F2's human check passes on at
+  least Wizard, Moses and Darla with **no body part lost**. A lost prop is
+  acceptable only if the preview shows it missing.
+- When it returns: Full scene stays the default everywhere. Cut out appears only on
+  the product page, as the **real rembg result on the product**, shown next to the
+  Full scene. Label it: "Background removed. Check the ears, tail, paws and
+  anything your pet is holding: whatever is missing here will be missing on the
+  print." The customer has to pick it on purpose. It's never pre-selected.
+
+### F5. Is the composite good enough to sell from?
+**Visually, yes, once the framing is fixed.** At full size, the `calib.cjs`
+render's lighting, rim and shading are as convincing as Printful's own mockup.
+That beats PugMug (a sample cat, not your pet), and it's the "your pet, live, on
+the product" experience competitors charge proof-waits for. It's **not** enough on
+its own for the product page. Crown & Paw sell with lifestyle, scale and
+real-customer photos, so H4's scale shot and the later sample photos still matter.
+Today it fails on framing (cropped ears and bat) and the corner streaks, so it
+isn't sellable yet.
+
+### Handoff to engineer
+1. **Scale/offset:** our 11 oz mug composite shows the art about 1.12-1.15x bigger
+   than Printful's mockup of the same print file, and shifted up. Compare
+   `check-george-printful.png` with a 1:1 render from
+   `calib.cjs` + `mug11-uv.png`/`mug11-white.png` + `upscale-eval/Wizard/Wizard-8x10-300dpi.jpg`.
+   Wizard's ear tips are clipped. Target: the F2 step 5 tolerances.
+2. **Corner streaks:** vertical bars in the top-right of the print area on both
+   pets. Likely the polynomial fit extrapolating past u/v = 1 at the corner, where
+   the result gets clamped. It must be gone at display size.
+3. **Retire `composite.cjs`** (the per-pixel UV version). At 1000 px it shatters
+   and smears. It must not reach the shop.
+4. **Build the F2 harness** (Printful reference fixtures, alignment metrics and a
+   side-by-side sheet at 1:1) so every product can be gated by a pass/fail flag.
+5. **Hide Cut out** in the shop UI until F4's bar is met.
+
+## 12. Showroom photography (2026-09-26)
+
+Only one calibrated Printful style per product for now. Style list checked against
+`Claude outputs/m4-measure/m40a.json`. The pillow and cooler style lists are empty
+there, so their names are Jake's and not checked.
+
+**Grid tiles: product only, on a plain background, all 7.** On a 2-column iPhone
+tile (about 170 px) a lifestyle scene shrinks the pet to a thumbnail and puts the
+room in front of it. Every scene also needs its own F2 calibration. Every tile
+uses the same backdrop colour, set by us.
+
+| Product | Style | Keep? | Risk to check | Tile text (scale cue) |
+|---|---|---|---|---|
+| Poster 8x10 | Transparent | Yes, with a soft shadow on our backdrop | With no shadow it looks like the Exact print view, not paper | "8 × 10 in print" |
+| Framed 8x10 | Flat / Front | Yes | The frame colour must match the variant we sell. The lip covers the edges (H5) | "8 × 10 in, framed" |
+| Canvas 16x20 | Wall / Wall | Yes. Front-on is the only honest view until U1 | It hides the depth and the wrap. Say "wrapped edges" in text only | "16 × 20 in canvas" |
+| Mug 11 oz | Default / Front view | Yes | The handle side is unknown (U2). Show it on the product page | "11 oz" (+ "15 · 20 oz") |
+| Pillow 18x18 | Default / Front | Yes, only if it's the puffed 3D render | The seams pull the edges in, so the mockup must show that | "18 × 18 in, insert incl." (only if H6 confirms) |
+| Coaster | Flat / Front | Yes | It fills the tile the same way the canvas does, so it can look like a trivet (H4) | "3.74 in, drink-sized" |
+| Can cooler | Flat / Front | Only if it reads as a cooler | Printful reviews report **white seams and a white bottom stripe**. The shot must show them | "Fits 12 oz cans" |
+
+**Product page, later:** add one scale shot per product, each calibrated with F2:
+canvas and framed in a room (Lifestyle), coaster with a drink, mug in a hand or on
+a desk, pillow on a sofa, cooler in a hand. Until then the tile text is the scale cue.
