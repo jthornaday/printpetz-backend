@@ -207,13 +207,13 @@ const renderAt = (plan: PrintPlan, width: number, height: number) =>
 
 /**
  * The full printed face at width x height. For most products that is just the art. Hanging
- * ornaments place the art (uncropped, at artAspect) in their hang-safe box and fill the rest
+ * products with a safe area place the art (uncropped, at artAspect) in it and fill the rest
  * with a soft blurred continuation of the same image, so the hole lands on background. Blur
  * scales with size so the preview and the print look alike. Used by BOTH the print file and
  * the shop preview — one layout, so what the customer sees is what prints.
  */
 const renderFace = async (plan: PrintPlan, width: number, height: number) => {
-  const safe = plan.product.hangSafe;
+  const safe = plan.product.safeArea;
   if (!safe) {
     return renderAt(plan, width, height);
   }

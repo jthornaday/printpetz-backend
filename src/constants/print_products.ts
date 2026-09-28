@@ -22,13 +22,14 @@ export type PrintProduct = {
   /** What the storefront shows first. Both treatments stay available. */
   defaultTreatment: Treatment;
   /**
-   * Hanging products (ornaments) have a hole near the top that punches through whatever is
-   * printed there. The art is placed, uncropped at artAspect, in a box from `top` to
-   * `1 - bottom` of the face height (centred), and the rest of the face is a soft blurred
-   * continuation of the same image — so the hole and ribbon land on background, never on the
-   * pet or its name. Fractions of the visible face; measured from Printful's own renders.
+   * Where the art can safely go on this product's face. Some of the print file is lost on the
+   * physical product — an ornament's hanging hole, a can cooler's bottom tab, a pillow's seams.
+   * The art is placed uncropped at artAspect in a box from `top` to `1 - bottom` of the face
+   * height (centred), and the rest of the face is a soft blurred continuation of the same image,
+   * so what's lost is background, never the pet or its name. Fractions of the visible face,
+   * measured from Printful's own renders (merch-calibrate coverage mapped into art coords).
    */
-  hangSafe?: { top: number; bottom: number; artAspect: number };
+  safeArea?: { top: number; bottom: number; artAspect: number };
 };
 
 export const SOURCE_ASPECT = 832 / 1024; // 0.8125
@@ -91,6 +92,9 @@ export const PRINT_PRODUCTS: Record<string, PrintProduct> = {
   can_cooler: {
     key: "can_cooler", label: "Can cooler",
     widthIn: 4.2, heightIn: 5.0933, dpi: 300, bleedIn: 0, defaultTreatment: "panel",
+    // Measured 2026-09-28: full width visible from v 0.03 to ~0.81; below that only the centre tab
+    // (u 0.22-0.78) shows, so the art's bottom corners — usually paws — were lost.
+    safeArea: { top: 0.05, bottom: 0.21, artAspect: 0.8 },
   },
   // Shaker Pint Glass, catalog 653 / variant 16359. Real spec from Printful's File
   // guidelines, 2026-09-23: print file 9.58in x 5.04in @300 DPI = 2874x1512.
@@ -109,6 +113,9 @@ export const PRINT_PRODUCTS: Record<string, PrintProduct> = {
   pillow_18x18: {
     key: "pillow_18x18", label: '18x18" decorative pillow',
     widthIn: 18, heightIn: 18, dpi: 150, bleedIn: 0, defaultTreatment: "panel",
+    // Measured 2026-09-28: ~6-8% of the file is lost into the seams on every side (visible u and v
+    // ~0.06..0.94). The art sits inside that, uncropped (it was a 19% square crop before).
+    safeArea: { top: 0.09, bottom: 0.09, artAspect: 0.8 },
   },
   // Holiday line, 2026-09-27. All three sizes are Printful's own printfiles
   // (/mockup-generator/printfiles), not product-page dimensions.
@@ -119,7 +126,7 @@ export const PRINT_PRODUCTS: Record<string, PrintProduct> = {
     widthIn: 3.18, heightIn: 3.18, dpi: 300, bleedIn: 0, defaultTreatment: "panel",
     // Measured 2026-09-28: hole centre at 0.170, bottom 0.198; the disc itself is inset 6.7% per
     // side (2.76" across). 0.23..0.85 keeps a 4:5 art box inside the circle below the hole.
-    hangSafe: { top: 0.23, bottom: 0.15, artAspect: 0.8 },
+    safeArea: { top: 0.23, bottom: 0.15, artAspect: 0.8 },
   },
   // Metal Christmas Ornament (product 901, Oval 23135): 525x650 @200, cover. Almost exactly our
   // 4:5 art, so nearly nothing is cropped. Front only; the back prints nothing for now.
@@ -128,7 +135,7 @@ export const PRINT_PRODUCTS: Record<string, PrintProduct> = {
     widthIn: 2.625, heightIn: 3.25, dpi: 200, bleedIn: 0, defaultTreatment: "panel",
     // Measured 2026-09-28: hole centre at 0.126, bottom 0.161 (edge to edge it punched every
     // pet's cap and name). Jake chose "placed below the hole".
-    hangSafe: { top: 0.19, bottom: 0.05, artAspect: 0.8 },
+    safeArea: { top: 0.19, bottom: 0.05, artAspect: 0.8 },
   },
   // Greeting Card 4x6 (product 568, variant 14457), made in the US (5x7 and A5 are EU-only).
   // Printful's printfile is 1842x1240 landscape with can_rotate; we send it portrait, 1240x1842.
@@ -140,8 +147,8 @@ export const PRINT_PRODUCTS: Record<string, PrintProduct> = {
 
 export const productAspect = (p: PrintProduct) => p.widthIn / p.heightIn;
 
-/** Shape the art is cropped to: the product's own, or the hang-safe box's for ornaments. */
-export const artAspect = (p: PrintProduct) => p.hangSafe?.artAspect ?? productAspect(p);
+/** Shape the art is cropped to: the product's own, or its safe-area box's. */
+export const artAspect = (p: PrintProduct) => p.safeArea?.artAspect ?? productAspect(p);
 
 /** Final file dimensions in pixels, bleed included. */
 export const outputSize = (p: PrintProduct) => ({
