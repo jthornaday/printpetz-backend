@@ -104,7 +104,7 @@ export const fulfillmentFromShopifyOrder = (order: any): FulfillmentRequest => {
       sourceImageUrl,
       productKey,
       treatment: (propOf(li, "treatment") ?? "panel") as Treatment,
-      quantity: li.quantity ?? 1,
+      quantity: (li.quantity ?? 1) * (mapped?.packQuantity ?? 1),
       generationId: propOf(li, "generation_id"),
       printfulVariantId: mapped?.printfulVariantId,
     });

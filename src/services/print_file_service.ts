@@ -21,7 +21,7 @@ import { fal } from "@fal-ai/client";
 
 import {
   PRINT_PRODUCTS, PrintProduct, Treatment,
-  needsSubjectAwareCrop, outputSize, productAspect,
+  artAspect, needsSubjectAwareCrop, outputSize,
 } from "@/constants/print_products";
 import { getObjectFromS3, uploadFileToS3 } from "./aws_service";
 import { handleRemoveBackground } from "./fal_service";
@@ -194,7 +194,7 @@ export const planPrintFile = async (
   // 3. Crop to aspect BEFORE resizing — resizing first wastes pixels and softens.
   const meta = await sharp(working).metadata();
   const srcW = meta.width ?? 0, srcH = meta.height ?? 0;
-  const win = cropWindow(srcW, srcH, productAspect(product), subjectBbox);
+  const win = cropWindow(srcW, srcH, artAspect(product), subjectBbox);
 
   return { product, treatment, working, win, size, subjectBbox, notes };
 };
@@ -205,6 +205,31 @@ const renderAt = (plan: PrintPlan, width: number, height: number) =>
     .extract(plan.win)
     .resize(width, height, { kernel: "lanczos3", fit: "fill" });
 
+/**
+ * The full printed face at width x height. For most products that is just the art. Hanging
+ * ornaments place the art (uncropped, at artAspect) in their hang-safe box and fill the rest
+ * with a soft blurred continuation of the same image, so the hole lands on background. Blur
+ * scales with size so the preview and the print look alike. Used by BOTH the print file and
+ * the shop preview — one layout, so what the customer sees is what prints.
+ */
+const renderFace = async (plan: PrintPlan, width: number, height: number) => {
+  const safe = plan.product.hangSafe;
+  if (!safe) {
+    return renderAt(plan, width, height);
+  }
+  const ah = Math.round(height * (1 - safe.top - safe.bottom));
+  const aw = Math.round(ah * safe.artAspect);
+  const art = await renderAt(plan, aw, ah).png().toBuffer();
+  const bg = await sharp(plan.working)
+    .extract(plan.win)
+    .resize(width, height, { fit: "cover" })
+    .blur(Math.max(0.3, width * 0.034))
+    .modulate({ brightness: 0.92 })
+    .png()
+    .toBuffer();
+  return sharp(bg).composite([{ input: art, left: Math.round((width - aw) / 2), top: Math.round(height * safe.top) }]);
+};
+
 export const buildPrintFile = async (
   input: Buffer,
   productKey: string,
@@ -214,7 +239,7 @@ export const buildPrintFile = async (
   const { product, size, subjectBbox, notes } = plan;
 
   // 4. One Lanczos pass to final visible size.
-  let pipeline = renderAt(plan, size.visibleW, size.visibleH);
+  let pipeline = await renderFace(plan, size.visibleW, size.visibleH);
 
   // 5. Mirrored bleed for gallery wrap, so the wrap never shows a raw edge.
   if (size.bleedPx > 0) {
@@ -256,7 +281,7 @@ export const renderPreview = async (plan: PrintPlan, maxEdge = 800) => {
   const scale = Math.min(1, maxEdge / Math.max(visibleW, visibleH));
   const width = Math.round(visibleW * scale), height = Math.round(visibleH * scale);
   const format: "png" | "jpeg" = plan.treatment === "cutout" ? "png" : "jpeg";
-  const pipeline = renderAt(plan, width, height);
+  const pipeline = await renderFace(plan, width, height);
   const buffer = format === "png"
     ? await pipeline.png({ compressionLevel: 9 }).toBuffer()
     : await pipeline.jpeg({ quality: 88 }).toBuffer();
