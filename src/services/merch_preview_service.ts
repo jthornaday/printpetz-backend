@@ -30,7 +30,7 @@ import { mockupCalibrationFor, renderMockup } from "./merch_mockup_service";
 import { planPrintFile, renderPreview } from "./print_file_service";
 
 /** Bump when print geometry or the preview render changes. Old previews are orphaned, not overwritten. */
-export const PREVIEW_VERSION = "v1";
+export const PREVIEW_VERSION = "v2"; // v2 2026-09-28: cooler + pillow safe-area layout
 
 /** Products the shop sells. The pint glass exists in the print catalog but is not for sale. */
 export const SHOP_PRODUCT_KEYS = [

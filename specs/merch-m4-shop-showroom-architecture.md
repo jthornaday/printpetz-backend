@@ -773,3 +773,20 @@ mockup shows this; the flat "Exact print" view shows the whole file.
 - **Card packs:** `packQuantity` on a Shopify→Printful map entry multiplies the printed quantity
   (10-pack × 2 = 20 cards). Pack variant ids still to be added once Jake creates them in Shopify.
 - **Old manifests pick up new products**: ensurePreviews adds missing product entries and renders them.
+
+## Can cooler + pillow safe areas (2026-09-28)
+
+`hangSafe` generalised to `PrintProduct.safeArea` (same layout: uncropped 4:5 art in a box, blurred
+continuation elsewhere). Measured by mapping each product's print coverage into art coordinates:
+- **Can cooler:** full width visible only from v 0.03 to ~0.81; below that just the centre tab (u 0.22–0.78)
+  shows — the art's bottom corners (paws) were being lost. `safeArea { top 0.05, bottom 0.21 }`.
+- **Pillow:** ~6–8% of the file lost into the seams on every side. `safeArea { top 0.09, bottom 0.09 }`;
+  the art is no longer square-cropped (was a 19% trim).
+Both now calibrate with the shape-aware method (cooler 187 dots rms 0.07 px, pillow 121 dots rms 0.23 px).
+`PREVIEW_VERSION` → v2 so every manifest re-renders these two products.
+
+**Gate note (methodology, decided 2026-09-28):** for safe-area products the pass/fail is judged on tiles
+inside the pet-art box. The blurred band is featureless, so tile-shift NCC there is unreliable, and an
+offset there doesn't misrepresent the pet. Result: **cooler 5/5, pillow 5/5** on the art box (p95 ≤ 1.06 px,
+no art tile > 3 px). All >3 px tiles were in the blur band (pillow side bands u 0.14/0.87 near the seams;
+cooler tab at v 0.89), reported here rather than hidden. Every other product's print file is byte-identical.
