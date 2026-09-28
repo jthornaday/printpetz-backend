@@ -59,6 +59,18 @@ export const PRINTFUL_VARIANTS: Record<string, PrintfulVariant> = {
     // pillow order is rejected with a 400 — reproduced with a draft order 2026-09-26.
     options: [{ id: "stitch_color", value: "white" }],
   },
+  ornament_ceramic_circle: {
+    variantId: 23133, productId: 900,
+    label: "Ceramic Ornaments, 2-Side Print — 1 pc / Circle", priceUsdAtLookup: 7.73,
+  },
+  ornament_metal_oval: {
+    variantId: 23135, productId: 901,
+    label: "Metal Christmas Ornament — White aluminum / Oval", priceUsdAtLookup: 4.61,
+  },
+  card_4x6: {
+    variantId: 14457, productId: 568,
+    label: "Greeting Card — 4″×6″ (envelope included)", priceUsdAtLookup: 2.55,
+  },
 };
 
 export const variantForProduct = (productKey: string): PrintfulVariant => {
@@ -83,7 +95,11 @@ export const variantForProduct = (productKey: string): PrintfulVariant => {
  * Shopify ids pulled from the Storefront API 2026-09-23. A new Shopify variant that is
  * not listed here falls back to the product key's default variant and logs a warning.
  */
-export const SHOPIFY_VARIANT_TO_PRINTFUL: Record<string, { printfulVariantId: number; label: string }> = {
+/**
+ * `packQuantity`: a Shopify variant sold as a pack (e.g. "10 cards") prints that many units per
+ * unit bought. Buying 2 × "10 cards" prints 20 cards.
+ */
+export const SHOPIFY_VARIANT_TO_PRINTFUL: Record<string, { printfulVariantId: number; label: string; packQuantity?: number }> = {
   "50526265999618": { printfulVariantId: 1320,  label: "Mug 11 oz" },
   "50526266032386": { printfulVariantId: 4830,  label: "Mug 15 oz" },
   "50526266065154": { printfulVariantId: 16586, label: "Mug 20 oz" },
@@ -94,6 +110,9 @@ export const SHOPIFY_VARIANT_TO_PRINTFUL: Record<string, { printfulVariantId: nu
   "50526510252290": { printfulVariantId: 19461, label: "Can cooler, regular 12 oz" },
   "50526510285058": { printfulVariantId: 19462, label: "Can cooler, slim 12 oz" },
   "50526365614338": { printfulVariantId: 4532,  label: "Pillow 18x18" },
+  "50554248265986": { printfulVariantId: 23133, label: "Ceramic ornament, circle, 2-sided" },
+  "50554260029698": { printfulVariantId: 23135, label: "Metal Christmas ornament, oval" },
+  "50554242990338": { printfulVariantId: 14457, label: "Greeting card 4x6" },
   "50526392549634": { printfulVariantId: 16359, label: "Shaker pint glass 16 oz" },
 };
 

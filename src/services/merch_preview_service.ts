@@ -17,9 +17,9 @@
 import crypto from "node:crypto";
 
 import {
+  artAspect,
   needsSubjectAwareCrop,
   PRINT_PRODUCTS,
-  productAspect,
   SOURCE_ASPECT,
   Treatment,
 } from "@/constants/print_products";
@@ -41,6 +41,9 @@ export const SHOP_PRODUCT_KEYS = [
   "coaster_4x4",
   "can_cooler",
   "pillow_18x18",
+  "ornament_ceramic_circle",
+  "ornament_metal_oval",
+  "card_4x6",
 ] as const;
 const TREATMENTS: Treatment[] = ["panel", "cutout"];
 const PREVIEW_MAX_EDGE = 800;
@@ -80,7 +83,7 @@ const needsRembg = (productKey: string, treatment: Treatment) =>
   treatment === "cutout" || needsSubjectAwareCrop(PRINT_PRODUCTS[productKey]);
 
 const trimmedShare = (productKey: string) => {
-  const target = productAspect(PRINT_PRODUCTS[productKey]);
+  const target = artAspect(PRINT_PRODUCTS[productKey]);
   const lost =
     target > SOURCE_ASPECT
       ? 1 - SOURCE_ASPECT / target
@@ -243,6 +246,25 @@ export const ensurePreviews = async (
 ): Promise<PreviewManifest> => {
   const srcSha = sha(source);
   let manifest = await readManifest(srcSha);
+  if (manifest) {
+    // Products added to the shop after this image's manifest was made get their entries now
+    // (rendered by the background job below), so existing customers see new products too.
+    const have = new Set(
+      manifest.entries.map((e) => `${e.productKey}/${e.treatment}`),
+    );
+    for (const productKey of SHOP_PRODUCT_KEYS) {
+      for (const treatment of TREATMENTS) {
+        if (!have.has(`${productKey}/${treatment}`)) {
+          manifest.entries.push({
+            productKey,
+            treatment,
+            status: "pending",
+            trimmed: trimmedShare(productKey),
+          });
+        }
+      }
+    }
+  }
 
   if (!manifest) {
     manifest = {

@@ -750,3 +750,26 @@ mockup shows this; the flat "Exact print" view shows the whole file.
 
 **Open before launch:** can cooler and pillow — both lose part of the art on the physical product
 (bottom tab, seams). Needs the same print-spec investigation the canvas got.
+
+## Holiday line (2026-09-28): ornaments, cards, shaped products
+
+- **Products:** Metal Christmas Ornament oval (Printful 23135, 525×650 @200), Greeting Card 4×6 portrait
+  (14457, 1240×1842 @300 on a rotatable landscape printfile — 5×7 and A5 are EU-only), Ceramic Ornament
+  2-Side circle (23133, 954×954 @300).
+- **Hanging holes.** Both ornaments have a hole near the top that punches through the print (measured:
+  oval hole bottom at v 0.161, ceramic 0.198). Edge-to-edge art put the hole through every regression
+  pet's cap and name (oval) or face (ceramic). `PrintProduct.hangSafe` places the art uncropped at 4:5 in
+  a box below the hole and fills the face with a blurred continuation of the same image
+  (`renderFace` in print_file_service — used by BOTH the print file and the preview). Jake chose this.
+- **Ceramic disc is physically 2.76″**, not 3.18″: 6.7% of the file is lost per side and ~41% of the
+  file area never prints. It is HIDDEN: its 5-pet mockup gate fails (3/5, p95 up to 2.3 px) and it is
+  not in the calibration registry. Needs its own investigation before it ships.
+- **Shape-agnostic calibration.** Dots on shaped products are identified by walking the lattice from the
+  centre dot; the grid offset is the one that leaves the printed shape centred (ambiguity → reject).
+  Rectangular products keep the corner-dot seed; all five existing registry entries reproduced
+  bit-for-bit. Dots clipped by the outline are excluded from the fit.
+- **5-pet gate (production path):** oval 5/5 (worst 0.81 px), card 5/5 (worst 1.18 px, style 14103
+  "Flat 3 / Front" — closed card), ceramic 2/5 (hidden).
+- **Card packs:** `packQuantity` on a Shopify→Printful map entry multiplies the printed quantity
+  (10-pack × 2 = 20 cards). Pack variant ids still to be added once Jake creates them in Shopify.
+- **Old manifests pick up new products**: ensurePreviews adds missing product entries and renders them.

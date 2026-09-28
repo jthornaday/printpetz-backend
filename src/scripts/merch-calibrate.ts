@@ -102,6 +102,27 @@ const TARGETS: Record<
     category: "Default / Front",
     options: [{ name: "stitch_color", value: "white" }],
   },
+  ornament_ceramic_circle: {
+    pid: 900,
+    vid: 23133,
+    placement: "front",
+    technique: "sublimation",
+    category: "Flat / Front",
+  },
+  ornament_metal_oval: {
+    pid: 901,
+    vid: 23135,
+    placement: "front",
+    technique: "sublimation",
+    category: "Flat / Front",
+  },
+  card_4x6: {
+    pid: 568,
+    vid: 14457,
+    placement: "front",
+    technique: "digital",
+    category: "Flat 3 / Front",
+  },
 };
 
 const sha = (b: Buffer) =>
@@ -402,7 +423,7 @@ const fit = async (key: string, dir: string) => {
   // Dots: dark relative to the white render, inside solid coverage.
   const dark = new Float32Array(W * H),
     lab = new Int32Array(W * H),
-    found: Array<{ x: number; y: number }> = [];
+    found: Array<{ x: number; y: number; cut: boolean }> = [];
   for (let i = 0; i < W * H; i++) {
     if (alpha[i] > 0.5) {
       dark[i] = Math.max(
@@ -424,12 +445,21 @@ const fit = async (key: string, dir: string) => {
       let sw = 0,
         sx = 0,
         sy = 0,
-        cnt = 0;
+        cnt = 0,
+        cut = false;
       while (st.length) {
         const k = st.pop() as number,
           kx = k % W,
           ky = (k / W) | 0;
         cnt++;
+        if (
+          alpha[k - 1] <= 0.5 ||
+          alpha[k + 1] <= 0.5 ||
+          alpha[k - W] <= 0.5 ||
+          alpha[k + W] <= 0.5
+        ) {
+          cut = true;
+        }
         sw += dark[k];
         sx += dark[k] * kx;
         sy += dark[k] * ky;
@@ -444,101 +474,37 @@ const fit = async (key: string, dir: string) => {
         }
       }
       if (cnt >= 6) {
-        found.push({ x: sx / sw + 0.5, y: sy / sw + 0.5 });
+        found.push({ x: sx / sw + 0.5, y: sy / sw + 0.5, cut });
       }
     }
   }
   const { NX, NY, dots } = grid(key);
-  if (found.length < NX * NY * 0.95) {
-    throw new Error(
-      `${key}: ${found.length} of ${NX * NY} dots visible — part of the print is hidden in this photo`,
-    );
-  }
-
-  // Identity from the grid's corners, then re-identify every dot through the fitted map.
-  const pick = (f: (p: { x: number; y: number }) => number) =>
-    found.reduce((b, p) => (f(p) > f(b) ? p : b));
-  const tl = pick((p) => -(p.x + p.y)),
-    br = pick((p) => p.x + p.y),
-    tr = pick((p) => p.x - p.y),
-    bl = pick((p) => p.y - p.x);
   const d = (i: number, j: number) => [dots[j * NX + i].u, dots[j * NX + i].v];
-  const Hm = homography(
-    [d(0, 0), d(NX - 1, 0), d(NX - 1, NY - 1), d(0, NY - 1)],
-    [
-      [tl.x, tl.y],
-      [tr.x, tr.y],
-      [br.x, br.y],
-      [bl.x, bl.y],
-    ],
-  );
-  const spacing = Math.hypot(tr.x - tl.x, tr.y - tl.y) / (NX - 1);
   const cx = (x0 + x1) / 2,
     cy = (y0 + y1) / 2,
     sxn = (x1 - x0) / 2,
     syn = (y1 - y0) / 2;
   const basisAt = (x: number, y: number) =>
     mapBasis((x - cx) / sxn, (y - cy) / syn);
-  let pairs: Array<{ x: number; y: number; u: number; v: number }> = [];
-  for (const dot of dots) {
-    const [px, py] = Hm(dot.u, dot.v);
-    let best = null as null | { x: number; y: number },
-      bd = Infinity;
-    for (const p of found) {
-      const dd = Math.hypot(p.x - px, p.y - py);
-      if (dd < bd) {
-        bd = dd;
-        best = p;
-      }
-    }
-    if (best && bd < spacing * 0.45) {
-      pairs.push({ ...best, u: dot.u, v: dot.v });
-    }
-  }
-  const du = dots[1].u - dots[0].u,
-    dv = dots[NX].v - dots[0].v;
-  const ev = (c: number[], x: number, y: number) =>
-    basisAt(x, y).reduce((s, t, k) => s + t * c[k], 0);
-  let cu: number[] = [],
-    cv: number[] = [];
-  for (let pass = 0; pass < 3; pass++) {
-    const A = pairs.map((p) => basisAt(p.x, p.y));
-    cu = solve(
-      A,
-      pairs.map((p) => p.u),
-    );
-    cv = solve(
-      A,
-      pairs.map((p) => p.v),
-    );
-    if (pass === 2) {
-      break;
-    }
-    pairs = found.flatMap((p) => {
-      const u = ev(cu, p.x, p.y),
-        v = ev(cv, p.x, p.y),
-        i = Math.round((u - dots[0].u) / du),
-        j = Math.round((v - dots[0].v) / dv);
-      if (i < 0 || i >= NX || j < 0 || j >= NY) {
-        return [];
-      }
-      const g = dots[j * NX + i];
-      return Math.abs(u - g.u) < du * 0.3 && Math.abs(v - g.v) < dv * 0.3
-        ? [{ ...p, u: g.u, v: g.v }]
-        : [];
-    });
-  }
-  const res = pairs.map((p) =>
-    Math.hypot(
-      (ev(cu, p.x, p.y) - p.u) * sxn * 2,
-      (ev(cv, p.x, p.y) - p.v) * syn * 2,
-    ),
-  );
-  const rms = Math.sqrt(res.reduce((s, r) => s + r * r, 0) / res.length),
-    max = Math.max(...res);
-
-  // Identity guard: a grid matched one column off still fits tightly, but then the edges of the
-  // covered area map far from the art's edges (0 and 1). Canvas edges include its mirrored wrap.
+  const evAt = (c: number[], x: number, y: number) =>
+    basisAt(x, y).reduce((acc, t, k) => acc + t * c[k], 0);
+  const fitPairs = (
+    ps: Array<{ x: number; y: number; u: number; v: number }>,
+  ) => {
+    const A = ps.map((p) => basisAt(p.x, p.y));
+    return {
+      cu: solve(
+        A,
+        ps.map((p) => p.u),
+      ),
+      cv: solve(
+        A,
+        ps.map((p) => p.v),
+      ),
+    };
+  };
+  // Where the printed shape's outline meets the centre row/column, in art coords. For a
+  // rectangle these are the art's edges (0 and 1); for a centred disc/oval they're symmetric.
   const row = Math.round(cy),
     col = Math.round(cx);
   const firstX = (from: number, to: number) => {
@@ -557,21 +523,238 @@ const fit = async (key: string, dir: string) => {
     }
     return from;
   };
-  const edges = [
-    ev(cu, firstX(x0, x1), row),
-    1 - ev(cu, firstX(x1, x0), row),
-    ev(cv, col, firstY(y0, y1)),
-    1 - ev(cv, col, firstY(y1, y0)),
+  const edgesFor = (cu: number[], cv: number[]) => [
+    evAt(cu, firstX(x0, x1), row),
+    1 - evAt(cu, firstX(x1, x0), row),
+    evAt(cv, col, firstY(y0, y1)),
+    1 - evAt(cv, col, firstY(y1, y0)),
   ];
+  const centring = (e: number[]) =>
+    Math.abs(e[0] - e[1]) + Math.abs(e[2] - e[3]);
+
+  // Rectangular prints show every dot: the four corner dots anchor identity.
+  // Shaped prints (disc, oval) hide the square file's corners: label every dot by walking the
+  // lattice from the centre dot, then choose the grid offset that leaves the shape centred on
+  // the art. Several offsets fit equally well; only the true one is centred (measured: 0.000 vs
+  // >= 0.147 on the ceramic disc), so an ambiguous choice is rejected, never guessed.
+  const cornersVisible = found.length >= NX * NY * 0.95;
+  let pairs: Array<{ x: number; y: number; u: number; v: number }> = [];
+  if (cornersVisible) {
+    const pick = (f: (p: { x: number; y: number }) => number) =>
+      found.reduce((b, p) => (f(p) > f(b) ? p : b));
+    const tl = pick((p) => -(p.x + p.y)),
+      br = pick((p) => p.x + p.y),
+      tr = pick((p) => p.x - p.y),
+      bl = pick((p) => p.y - p.x);
+    const Hm = homography(
+      [d(0, 0), d(NX - 1, 0), d(NX - 1, NY - 1), d(0, NY - 1)],
+      [
+        [tl.x, tl.y],
+        [tr.x, tr.y],
+        [br.x, br.y],
+        [bl.x, bl.y],
+      ],
+    );
+    const spacing = Math.hypot(tr.x - tl.x, tr.y - tl.y) / (NX - 1);
+    for (const dot of dots) {
+      const [px, py] = Hm(dot.u, dot.v);
+      let best = null as null | { x: number; y: number },
+        bd = Infinity;
+      for (const p of found) {
+        const dd = Math.hypot(p.x - px, p.y - py);
+        if (dd < bd) {
+          bd = dd;
+          best = p;
+        }
+      }
+      if (best && bd < spacing * 0.45) {
+        pairs.push({ x: best.x, y: best.y, u: dot.u, v: dot.v });
+      }
+    }
+  } else {
+    const whole = found.filter((p) => !p.cut); // dots clipped by the outline have biased centroids
+    const N = whole.length;
+    if (N < NX * NY * 0.4) {
+      throw new Error(
+        `${key}: only ${N} whole dots visible — too little of the print shows to calibrate`,
+      );
+    }
+    const nn = whole.map((p, a) => {
+      let b = Infinity;
+      for (let k = 0; k < N; k++) {
+        if (k !== a) {
+          b = Math.min(b, Math.hypot(whole[k].x - p.x, whole[k].y - p.y));
+        }
+      }
+      return b;
+    });
+    const sp = [...nn].sort((a, b) => a - b)[N >> 1];
+    const ax: number[][] = [],
+      ay: number[][] = [];
+    for (let a = 0; a < N; a++) {
+      for (let k = 0; k < N; k++) {
+        const dx = whole[k].x - whole[a].x,
+          dy = whole[k].y - whole[a].y;
+        if (k === a || Math.hypot(dx, dy) > 1.4 * sp) {
+          continue;
+        }
+        if (Math.abs(dx) > Math.abs(dy)) {
+          if (dx > 0) {
+            ax.push([dx, dy]);
+          }
+        } else if (dy > 0) {
+          ay.push([dx, dy]);
+        }
+      }
+    }
+    const med = (v: number[][], c: number) =>
+      v.map((q) => q[c]).sort((a, b) => a - b)[v.length >> 1];
+    const mx = whole.reduce((t, p) => t + p.x, 0) / N,
+      my = whole.reduce((t, p) => t + p.y, 0) / N;
+    let start = 0;
+    for (let k = 1; k < N; k++) {
+      if (
+        Math.hypot(whole[k].x - mx, whole[k].y - my) <
+        Math.hypot(whole[start].x - mx, whole[start].y - my)
+      ) {
+        start = k;
+      }
+    }
+    const lab: Array<[number, number] | null> = new Array(N).fill(null);
+    const vecA: number[][] = new Array(N),
+      vecB: number[][] = new Array(N);
+    lab[start] = [0, 0];
+    vecA[start] = [med(ax, 0), med(ax, 1)];
+    vecB[start] = [med(ay, 0), med(ay, 1)];
+    const queue = [start],
+      taken = new Set(["0,0"]);
+    while (queue.length) {
+      const a = queue.shift() as number,
+        [li, lj] = lab[a] as [number, number];
+      for (const [di, dj] of [
+        [1, 0],
+        [-1, 0],
+        [0, 1],
+        [0, -1],
+      ]) {
+        const tag = `${li + di},${lj + dj}`;
+        if (taken.has(tag)) {
+          continue;
+        }
+        const px = whole[a].x + di * vecA[a][0] + dj * vecB[a][0],
+          py = whole[a].y + di * vecA[a][1] + dj * vecB[a][1];
+        let best = -1,
+          bd = Infinity;
+        for (let k = 0; k < N; k++) {
+          const dd = Math.hypot(whole[k].x - px, whole[k].y - py);
+          if (dd < bd) {
+            bd = dd;
+            best = k;
+          }
+        }
+        if (best < 0 || bd > 0.3 * sp || lab[best]) {
+          continue;
+        }
+        lab[best] = [li + di, lj + dj];
+        taken.add(tag);
+        const obs = [whole[best].x - whole[a].x, whole[best].y - whole[a].y];
+        vecA[best] = di ? [obs[0] * di, obs[1] * di] : vecA[a];
+        vecB[best] = dj ? [obs[0] * dj, obs[1] * dj] : vecB[a];
+        queue.push(best);
+      }
+    }
+    const L = whole.flatMap((p, k) =>
+      lab[k]
+        ? [
+            {
+              x: p.x,
+              y: p.y,
+              i: (lab[k] as number[])[0],
+              j: (lab[k] as number[])[1],
+            },
+          ]
+        : [],
+    );
+    const imin = Math.min(...L.map((p) => p.i)),
+      imax = Math.max(...L.map((p) => p.i)),
+      jmin = Math.min(...L.map((p) => p.j)),
+      jmax = Math.max(...L.map((p) => p.j));
+    const scored: Array<{
+      oi: number;
+      oj: number;
+      score: number;
+      ps: typeof pairs;
+    }> = [];
+    for (let oi = -imin; oi + imax <= NX - 1; oi++) {
+      for (let oj = -jmin; oj + jmax <= NY - 1; oj++) {
+        const ps = L.map((p) => {
+          const g = dots[(p.j + oj) * NX + (p.i + oi)];
+          return { x: p.x, y: p.y, u: g.u, v: g.v };
+        });
+        const f = fitPairs(ps);
+        scored.push({ oi, oj, score: centring(edgesFor(f.cu, f.cv)), ps });
+      }
+    }
+    scored.sort((a, b) => a.score - b.score);
+    if (
+      !scored.length ||
+      scored[0].score > 0.02 ||
+      (scored[1] && scored[1].score < 0.05)
+    ) {
+      throw new Error(
+        `${key}: grid position ambiguous (best centring ${scored[0]?.score.toFixed(3)}, next ${scored[1]?.score.toFixed(3)})`,
+      );
+    }
+    pairs = scored[0].ps;
+  }
+  const du = dots[1].u - dots[0].u,
+    dv = dots[NX].v - dots[0].v;
+  // Refine: fit, then re-identify every usable dot through the fitted map. For shaped prints,
+  // dots clipped by the outline are left out — their centroids are pulled inward.
+  const usable = cornersVisible ? found : found.filter((p) => !p.cut);
+  let cu: number[] = [],
+    cv: number[] = [];
+  for (let pass = 0; pass < 3; pass++) {
+    ({ cu, cv } = fitPairs(pairs));
+    if (pass === 2) {
+      break;
+    }
+    pairs = usable.flatMap((p) => {
+      const u = evAt(cu, p.x, p.y),
+        v = evAt(cv, p.x, p.y),
+        i = Math.round((u - dots[0].u) / du),
+        j = Math.round((v - dots[0].v) / dv);
+      if (i < 0 || i >= NX || j < 0 || j >= NY) {
+        return [];
+      }
+      const g = dots[j * NX + i];
+      return Math.abs(u - g.u) < du * 0.3 && Math.abs(v - g.v) < dv * 0.3
+        ? [{ x: p.x, y: p.y, u: g.u, v: g.v }]
+        : [];
+    });
+  }
+  const res = pairs.map((p) =>
+    Math.hypot(
+      (evAt(cu, p.x, p.y) - p.u) * sxn * 2,
+      (evAt(cv, p.x, p.y) - p.v) * syn * 2,
+    ),
+  );
+  const rms = Math.sqrt(res.reduce((acc, r) => acc + r * r, 0) / res.length),
+    max = Math.max(...res);
+
+  // Identity guard. Rectangles: the covered area's edges must map to the art's edges (0 and 1);
+  // a grid matched one column off still fits tightly but fails this. Canvas edges include its
+  // mirrored wrap. Shaped prints: the outline must sit centred on the art (the edges themselves
+  // are inset by the product's shape — that inset is a real print crop, reported below).
+  const edges = edgesFor(cu, cv);
   const edgeTol = PRINT_PRODUCTS[key].bleedIn > 0 ? 0.25 : 0.05;
-  if (
-    pairs.length < NX * NY * 0.95 ||
-    rms > 0.5 ||
-    max > 2.5 ||
-    edges.some((e) => Math.abs(e) > edgeTol)
-  ) {
+  const need = cornersVisible ? NX * NY : usable.length;
+  const identityOk = cornersVisible
+    ? edges.every((e) => Math.abs(e) <= edgeTol)
+    : centring(edges) <= 0.02;
+  if (pairs.length < need * 0.95 || rms > 0.5 || max > 2.5 || !identityOk) {
     throw new Error(
-      `${key}: calibration rejected (dots ${pairs.length}/${NX * NY}, rms ${rms.toFixed(2)}px, max ${max.toFixed(2)}px, edges ${edges.map((e) => e.toFixed(3)).join("/")})`,
+      `${key}: calibration rejected (dots ${pairs.length}/${need}, rms ${rms.toFixed(2)}px, max ${max.toFixed(2)}px, edges ${edges.map((e) => e.toFixed(3)).join("/")}${cornersVisible ? "" : `, centring ${centring(edges).toFixed(3)}`})`,
     );
   }
 
@@ -592,7 +775,7 @@ const fit = async (key: string, dir: string) => {
     mask: await sharp(alpha8, { raw: { width: W, height: H, channels: 1 } })
       .png({ compressionLevel: 9 })
       .toBuffer(),
-    stats: `dots ${pairs.length}/${NX * NY}, rms ${rms.toFixed(2)}px, max ${max.toFixed(2)}px, edges ${edges.map((e) => e.toFixed(3)).join("/")}`,
+    stats: `dots ${pairs.length}/${need}${cornersVisible ? "" : " (shape-limited)"}, rms ${rms.toFixed(2)}px, max ${max.toFixed(2)}px, edges ${edges.map((e) => e.toFixed(3)).join("/")}`,
   };
 };
 
