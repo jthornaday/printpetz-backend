@@ -112,7 +112,9 @@ export const SHOPIFY_VARIANT_TO_PRINTFUL: Record<string, { printfulVariantId: nu
   "50526365614338": { printfulVariantId: 4532,  label: "Pillow 18x18" },
   "50554248265986": { printfulVariantId: 23133, label: "Ceramic ornament, circle, 2-sided" },
   "50554260029698": { printfulVariantId: 23135, label: "Metal Christmas ornament, oval" },
-  "50554242990338": { printfulVariantId: 14457, label: "Greeting card 4x6" },
+  // Cards are sold in packs only; the single-card variant was removed in Shopify 2026-09-28.
+  "50556470034690": { printfulVariantId: 14457, label: "Greeting card 4x6, 5-pack", packQuantity: 5 },
+  "50556470067458": { printfulVariantId: 14457, label: "Greeting card 4x6, 10-pack", packQuantity: 10 },
   "50526392549634": { printfulVariantId: 16359, label: "Shaker pint glass 16 oz" },
 };
 
