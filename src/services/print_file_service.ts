@@ -184,6 +184,10 @@ const personalize = (product: PrintProduct, opts?: PrintOptions): Personalizatio
   return "omitted" in fit ? { lines: null, fontPx: 0, omitted: fit.omitted } : { lines: fit.lines, fontPx: fit.fontPx };
 };
 
+/** How a product would print this display name (band products), or null for other products. */
+export const personalizationFor = (productKey: string, displayName: string | null | undefined) =>
+  personalize(PRINT_PRODUCTS[productKey], { displayName });
+
 export const planPrintFile = async (
   input: Buffer,
   productKey: string,

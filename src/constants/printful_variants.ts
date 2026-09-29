@@ -119,6 +119,8 @@ export const SHOPIFY_VARIANT_TO_PRINTFUL: Record<string, { printfulVariantId: nu
   // Cards are sold in packs only; the single-card variant was removed in Shopify 2026-09-28.
   "50556470034690": { printfulVariantId: 14457, label: "Greeting card 4x6, 5-pack", packQuantity: 5 },
   "50556470067458": { printfulVariantId: 14457, label: "Greeting card 4x6, 10-pack", packQuantity: 10 },
+  "50558146150658": { printfulVariantId: 16785, label: "Pet bowl 18 oz" },
+  "50558146183426": { printfulVariantId: 16786, label: "Pet bowl 32 oz" },
   "50526392549634": { printfulVariantId: 16359, label: "Shaker pint glass 16 oz" },
 };
 

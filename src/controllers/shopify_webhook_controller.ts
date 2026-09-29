@@ -11,7 +11,7 @@ import crypto from "node:crypto";
 
 import { Request, Response } from "express";
 
-import { Treatment } from "@/constants/print_products";
+import { PRINT_PRODUCTS, Treatment } from "@/constants/print_products";
 import { printfulVariantForShopify } from "@/constants/printful_variants";
 import AppConstants from "@/constants/app_constants";
 import {
@@ -100,10 +100,23 @@ export const fulfillmentFromShopifyOrder = (order: any): FulfillmentRequest => {
         JSON.stringify({ shopifyOrderId: order?.id, variantId: li.variant_id, productKey }),
       );
     }
+    let treatment = (propOf(li, "treatment") ?? "panel") as Treatment;
+    if (PRINT_PRODUCTS[productKey]?.band) {
+      // Products that print the pet's name resolve it server-side from the generation, so the
+      // generation id is required. Only the full-scene design exists for them.
+      const gid = Number(propOf(li, "generation_id"));
+      if (!Number.isInteger(gid) || gid <= 0) {
+        throw new UnfulfillableOrderError(`line item ${i} (${productKey}) has no valid generation_id`);
+      }
+      if (treatment !== "panel") {
+        console.warn("[shopify-webhook] coercing treatment to panel", JSON.stringify({ shopifyOrderId: order?.id, productKey, treatment }));
+        treatment = "panel";
+      }
+    }
     items.push({
       sourceImageUrl,
       productKey,
-      treatment: (propOf(li, "treatment") ?? "panel") as Treatment,
+      treatment,
       quantity: (li.quantity ?? 1) * (mapped?.packQuantity ?? 1),
       generationId: propOf(li, "generation_id"),
       printfulVariantId: mapped?.printfulVariantId,
