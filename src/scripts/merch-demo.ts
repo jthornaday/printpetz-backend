@@ -10,7 +10,6 @@ import "dotenv/config";
 
 import fs from "node:fs";
 
-import { getObjectFromS3 } from "@/services/aws_service";
 import {
   ensurePreviews,
   PreviewManifest,
@@ -34,16 +33,14 @@ const main = async () => {
   }
   const out: Array<{ source: string } & PreviewManifest> = [];
   for (const source of sources) {
-    let m = await ensurePreviews(await load(source));
-    // Wait for everything the shop shows: flat previews AND photoreal mockups.
+    const buf = await load(source);
+    let m = await ensurePreviews(buf);
+    // Wait for everything the shop shows: flat previews AND photoreal mockups. Ask the service
+    // (as the shop does) rather than the saved manifest, whose `complete` can be stale when a
+    // product gains a calibration after the manifest was written.
     for (let i = 0; i < 120 && m.complete !== true; i++) {
       await new Promise((r) => setTimeout(r, 1000));
-      const raw = await getObjectFromS3(
-        `merch/previews/${m.srcSha}/${m.version}/manifest.json`,
-      );
-      if (raw) {
-        m = JSON.parse(raw.toString("utf8"));
-      }
+      m = await ensurePreviews(buf);
     }
     const notReady = m.entries.filter((e) => e.status !== "ready");
     if (notReady.length) {
