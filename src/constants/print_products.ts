@@ -30,6 +30,22 @@ export type PrintProduct = {
    * measured from Printful's own renders (merch-calibrate coverage mapped into art coords).
    */
   safeArea?: { top: number; bottom: number; artAspect: number };
+  /**
+   * Wrap-around band (pet bowl). A lockup — the portrait plus the pet's printed display name — is
+   * centred on the front (x = W/2), with single portraits at W/2 + sideCentres·W. If the name can't
+   * print (none, unsupported characters, too long) the band is portraits only at fallbackCentres.
+   * Pixel values are in print-file space; smaller renders (previews) scale them. Nothing may be
+   * printed within seamClearancePx of the ends, which meet at the back. Spec: merch-pet-bowl.md.
+   */
+  band?: {
+    portraitAspect: number;
+    portraitHeight: number; // fraction of the face height
+    sideCentres: number[]; // offsets from W/2, fraction of W
+    fallbackCentres: number[];
+    lockup: { gapPx: number; maxWidthPx: number; color: string; maxFontPx: number; twoLineMaxFontPx: number; minFontPx: number; tracking: number };
+    seamClearancePx: number;
+    previewWidth: number;
+  };
 };
 
 export const SOURCE_ASPECT = 832 / 1024; // 0.8125
@@ -137,6 +153,22 @@ export const PRINT_PRODUCTS: Record<string, PrintProduct> = {
     // pet's cap and name). Jake chose "placed below the hole".
     safeArea: { top: 0.19, bottom: 0.05, artAspect: 0.8 },
   },
+  // Pet Bowl (product 678; 18 oz 16785, 32 oz 16786 — same printfile): one wrap-around band,
+  // 6496x803 @300 (21.65 x 2.68 in), fill=fit. Printful's front view shows x = W/2. Design "B2"
+  // (Jake, 2026-09-28): portrait + UPPERCASE display name on the front, portraits at the sides.
+  pet_bowl: {
+    key: "pet_bowl", label: "Pet bowl, wrap-around band",
+    widthIn: 6496 / 300, heightIn: 803 / 300, dpi: 300, bleedIn: 0, defaultTreatment: "panel",
+    band: {
+      portraitAspect: 0.8,
+      portraitHeight: 700 / 803,
+      sideCentres: [-1 / 3, 1 / 3],
+      fallbackCentres: [-0.4, -0.2, 0, 0.2, 0.4],
+      lockup: { gapPx: 60, maxWidthPx: 2400, color: "#14264f", maxFontPx: 540, twoLineMaxFontPx: 417, minFontPx: 180, tracking: 0.056 },
+      seamClearancePx: 75,
+      previewWidth: 2600,
+    },
+  },
   // Greeting Card 4x6 (product 568, variant 14457), made in the US (5x7 and A5 are EU-only).
   // Printful's printfile is 1842x1240 landscape with can_rotate; we send it portrait, 1240x1842.
   card_4x6: {
@@ -148,7 +180,7 @@ export const PRINT_PRODUCTS: Record<string, PrintProduct> = {
 export const productAspect = (p: PrintProduct) => p.widthIn / p.heightIn;
 
 /** Shape the art is cropped to: the product's own, or its safe-area box's. */
-export const artAspect = (p: PrintProduct) => p.safeArea?.artAspect ?? productAspect(p);
+export const artAspect = (p: PrintProduct) => p.band?.portraitAspect ?? p.safeArea?.artAspect ?? productAspect(p);
 
 /** Final file dimensions in pixels, bleed included. */
 export const outputSize = (p: PrintProduct) => ({
