@@ -55,8 +55,10 @@ export type PrintOptions = { displayName?: string | null };
 
 /** How the name will print on a band product, decided once in the plan. */
 export type Personalization =
-  | { lines: string[]; fontPx: number; omitted?: undefined }
-  | { lines: null; fontPx: 0; omitted: NameOmitted };
+  /** frontPortrait false: the name was too long beside the portrait, so it prints alone on the
+   *  front (Jake, 2026-09-29); the side portraits still show the pet. */
+  | { lines: string[]; fontPx: number; frontPortrait: boolean; omitted?: undefined }
+  | { lines: null; fontPx: 0; frontPortrait?: undefined; omitted: NameOmitted };
 
 const sha = (b: Buffer) => crypto.createHash("sha256").update(b).digest("hex").slice(0, 32);
 
@@ -180,8 +182,14 @@ const personalize = (product: PrintProduct, opts?: PrintOptions): Personalizatio
   const L = product.band.lockup;
   const H = Math.round(product.heightIn * product.dpi);
   const portraitW = Math.round(H * product.band.portraitHeight * product.band.portraitAspect);
-  const fit = fitName(clean.name, { maxWidthPx: L.maxWidthPx - portraitW - L.gapPx, maxFontPx: L.maxFontPx, twoLineMaxFontPx: L.twoLineMaxFontPx, minFontPx: L.minFontPx, tracking: L.tracking });
-  return "omitted" in fit ? { lines: null, fontPx: 0, omitted: fit.omitted } : { lines: fit.lines, fontPx: fit.fontPx };
+  const fitIn = (maxWidthPx: number) =>
+    fitName(clean.name, { maxWidthPx, maxFontPx: L.maxFontPx, twoLineMaxFontPx: L.twoLineMaxFontPx, minFontPx: L.minFontPx, tracking: L.tracking });
+  const beside = fitIn(L.maxWidthPx - portraitW - L.gapPx);
+  if (!("omitted" in beside)) {
+    return { lines: beside.lines, fontPx: beside.fontPx, frontPortrait: true };
+  }
+  const alone = fitIn(L.maxWidthPx);
+  return "omitted" in alone ? { lines: null, fontPx: 0, omitted: alone.omitted } : { lines: alone.lines, fontPx: alone.fontPx, frontPortrait: false };
 };
 
 /** How a product would print this display name (band products), or null for other products. */
@@ -270,13 +278,17 @@ const renderBand = async (plan: PrintPlan, width: number, height: number) => {
   const pz = plan.personalization;
   if (pz && pz.lines) {
     const textW = Math.max(...pz.lines.map((l) => lineWidth(l, pz.fontPx, L.tracking)));
-    const lockW = pwF + L.gapPx + textW, lockLeft = FW / 2 - lockW / 2;
-    addPortrait(lockLeft + pwF / 2);
+    const lockW = pz.frontPortrait ? pwF + L.gapPx + textW : textW, lockLeft = FW / 2 - lockW / 2;
+    if (pz.frontPortrait) {
+      addPortrait(lockLeft + pwF / 2);
+    }
     const cap = capHeightEm() * pz.fontPx, gap = 0.3 * pz.fontPx;
     const blockH = pz.lines.length * cap + (pz.lines.length - 1) * gap;
     const firstBase = FH / 2 - blockH / 2 + cap;
-    const x = lockLeft + pwF + L.gapPx;
-    const d = pz.lines.map((line, i) => linePathData(line, x, firstBase + i * (cap + gap), pz.fontPx, L.tracking)).join("");
+    const x = pz.frontPortrait ? lockLeft + pwF + L.gapPx : lockLeft;
+    // Beside the portrait, lines are left-aligned against it; alone, each line is centred.
+    const lineX = (line: string) => (pz.frontPortrait ? x : FW / 2 - lineWidth(line, pz.fontPx, L.tracking) / 2);
+    const d = pz.lines.map((line, i) => linePathData(line, lineX(line), firstBase + i * (cap + gap), pz.fontPx, L.tracking)).join("");
     items.push({ leftF: x, widthF: textW });
     layers.push({ input: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><g transform="scale(${k})"><path d="${d}" fill="${L.color}"/></g></svg>`), left: 0, top: 0 });
     band.sideCentres.forEach((c) => addPortrait(FW / 2 + c * FW));

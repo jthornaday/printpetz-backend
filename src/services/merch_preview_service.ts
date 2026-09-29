@@ -54,7 +54,7 @@ export const SHOP_PRODUCT_KEYS = [
 const TREATMENTS: Treatment[] = ["panel", "cutout"];
 const PREVIEW_MAX_EDGE = 800;
 /** Bump when the band (name) layout changes, so name-bearing previews re-render. */
-const BAND_LAYOUT_VERSION = "b1";
+const BAND_LAYOUT_VERSION = "b2";
 
 /** Band products (pet bowl) only have the full-scene design. */
 const treatmentsFor = (productKey: string): Treatment[] =>
@@ -72,11 +72,11 @@ const personalizationEntry = (
   const nameKey = crypto
     .createHash("sha256")
     .update(
-      `${BAND_LAYOUT_VERSION}|${JSON.stringify(pz.lines ?? ["∅", pz.omitted])}`,
+      `${BAND_LAYOUT_VERSION}|${JSON.stringify(pz.lines ? [...pz.lines, pz.frontPortrait] : ["∅", pz.omitted])}`,
     )
     .digest("hex")
     .slice(0, 12);
-  return { nameKey, lines: pz.lines, omitted: pz.omitted };
+  return { nameKey, lines: pz.lines, frontPortrait: pz.frontPortrait, omitted: pz.omitted };
 };
 
 export type PreviewEntry = {
@@ -97,6 +97,8 @@ export type PreviewEntry = {
   personalization?: {
     nameKey: string;
     lines: string[] | null;
+    /** false: the name was too long beside the portrait, so it prints alone on the front. */
+    frontPortrait?: boolean;
     omitted?: string;
   };
 };

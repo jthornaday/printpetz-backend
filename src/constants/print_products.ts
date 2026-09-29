@@ -161,10 +161,13 @@ export const PRINT_PRODUCTS: Record<string, PrintProduct> = {
     widthIn: 6496 / 300, heightIn: 803 / 300, dpi: 300, bleedIn: 0, defaultTreatment: "panel",
     band: {
       portraitAspect: 0.8,
-      portraitHeight: 700 / 803,
+      // Front lockup narrowed 2026-09-29 (Jake): at 2400 px it spanned ±66° and Printful's render
+      // showed the portrait squeezed at the silhouette. 1560 px = 5.2 in = ±43°, the part of the
+      // curve that reads flat from the front.
+      portraitHeight: 620 / 803,
       sideCentres: [-1 / 3, 1 / 3],
       fallbackCentres: [-0.4, -0.2, 0, 0.2, 0.4],
-      lockup: { gapPx: 60, maxWidthPx: 2400, color: "#14264f", maxFontPx: 540, twoLineMaxFontPx: 417, minFontPx: 180, tracking: 0.056 },
+      lockup: { gapPx: 60, maxWidthPx: 1560, color: "#14264f", maxFontPx: 540, twoLineMaxFontPx: 417, minFontPx: 180, tracking: 0.056 },
       seamClearancePx: 75,
       previewWidth: 2600,
     },
