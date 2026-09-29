@@ -74,10 +74,10 @@ Where it runs:
 ```ts
 band?: {
   portraitAspect: 0.8;          // artAspect() returns this, so planPrintFile's crop window is 4:5
-  portraitHeight: 700 / 803;    // fraction of H; corner radius 6% of portrait height
+  portraitHeight: 620 / 803;    // fraction of H; corner radius 6% of portrait height (was 700)
   sideCentres: [-1 / 3, 1 / 3]; // offsets from W/2, fraction of W (B2)
   fallbackCentres: [-0.4, -0.2, 0, 0.2, 0.4]; // A2
-  lockup: { gapPx: 60, maxWidthPx: 2400, color: "#14264f",
+  lockup: { gapPx: 60, maxWidthPx: 1560 /* was 2400 */, color: "#14264f",
             maxFontPx: 540, twoLineMaxFontPx: 417, minFontPx: 180, tracking: 0.056 /* em */ };
   seamClearancePx: 75;          // nothing non-white within 0.25in of x=0 / x=W (asserted)
   previewWidth: 2600;           // see Decision 4
@@ -186,6 +186,28 @@ Why 2400 px: the lockup spans ±1200 px, which is ±66° around the bowl. Past a
 foreshortens the letters hard. The side portraits' inner edges sit at ±1885 px. **Tune
 `maxWidthPx` once the mockup exists.** This is a constant, not a redesign.
 
+**Narrowed 2026-09-29 (Jake approved).** At 2400 px most names used the full ±66°, and Printful's
+render showed the portrait squeezed and half-hidden at the silhouette. Now `maxWidthPx` is 1560
+(5.2 in, ±43°, the part that reads flat from the front), and the portrait is 620 px tall (2.07 in;
+it was 2.33 in). The name box is 1560 − 496 − 60 = 1004 px. The table above is superseded:
+
+| Name | Cap height |
+|---|---|
+| MAX | 0.88 in |
+| DARLA | 0.58 in |
+| MOSES | 0.55 in |
+| WIZARD | 0.49 in |
+| PEANUT | 0.47 in |
+| GEORGE, BISCUIT | 0.46 in |
+| MR BEANS | 2 lines, 0.57 in |
+
+**Long names (Jake, 2026-09-29): drop the front portrait.** If the name won't fit beside the
+portrait, it prints alone, centred on the front, and may use the whole 1560 px. The side portraits
+still show the pet. The preview's `personalization.frontPortrait` is false in this case, so the
+shop can say so. Measured: SNICKERS 0.58 in; BARKINGTON 0.44 in; SIR BARKINGTON 2 lines, 0.44 in;
+PRINCESS BUTTERCUP 2 lines, 0.49 in; CAPTAIN FLUFFYPANTS 2 lines, 0.42 in. MR. WHISKERS MCFLUFF
+and BARKINGTONSHIRE still don't fit, so they print portraits only (A2).
+
 ---
 
 ## Decision 3: preview caching
@@ -246,12 +268,20 @@ The bowl breaks some of its assumptions:
    lattice on a cylinder is exactly where "grid position ambiguous" fires, so **put a unique marker
    at (0.5, 0.5)** (a larger or missing dot) to anchor the offset.
 4. **Foreshortening at the silhouette.** du/dx grows without limit toward ±90°, where a polynomial
-   fits badly. Limit the fit and the mask to the visible, legible range (|u − 0.5| ≤ 0.22). B2 puts
-   only the lockup there (|u − 0.5| ≤ 0.185). The side portraits sit at ±120° and never appear in
+   fits badly. Limit the fit and the mask to the visible, legible range. As built: `fitDomainU`
+   0.125, which matches the narrowed lockup (|u − 0.5| ≤ 0.12). Measured, fitting out to 0.154
+   already gives rms 0.99 px. The side portraits sit at ±120° and never appear in
    the front view.
 5. **The gate** follows the safe-area rule: judge NCC tiles **inside the lockup box** only. Plain
    white elsewhere has no texture. Text edges are strong features, but skip one-directional tiles
    (horizontal letter strokes) as the gate already does.
+
+   **Result 2026-09-29.** Calibration: 65/65 dots, rms 0.38 px, max 0.71 px. 5-pet gate against
+   Printful's own renders of the real print files, each pet with its own name, all pass: p95
+   0.69–1.06 px, max ≤ 1.25 px. The first two attempts failed because of a labelling bug, not
+   because of the model. On a foreshortened grid the median dot spacing is too small, so the
+   walk's seed vectors were wrong and it labelled only the marker. Fixed by seeding the walk from
+   the marker's own neighbours, with a tolerance based on the local step.
 6. **Taper and top-down view.** If the bowl is slightly conical or photographed from above, the
    band shows up as a curved arc and v depends on x. The 2-D polynomial handles that. Just don't
    assume rows are horizontal.
@@ -324,7 +354,7 @@ their real `pet_name`, plus overrides:
 - **Assert on each file:**
   - 6496×803, 300 DPI, JPEG.
   - Every pixel within 75 px of x = 0 and x = W−1 is white (seam).
-  - The lockup's bounding box is centred on W/2 within 2 px and is at most 2400 px wide.
+  - The lockup's bounding box is centred on W/2 within 2 px and is at most 1560 px wide.
   - Navy pixels are present exactly when a name is printed.
   - The downscaled print file matches the preview (mean abs diff below a small threshold).
   - The other 10 products' files are byte-identical to before.

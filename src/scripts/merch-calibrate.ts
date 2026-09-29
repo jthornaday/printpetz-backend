@@ -50,8 +50,39 @@ const TARGETS: Record<
     technique: string;
     category: string;
     options?: Array<{ name: string; value: string }>;
+    /** Pin the photo style instead of choosing it by category. */
+    styleId?: number;
+    /**
+     * Dot-grid override for unusual shapes. The pet bowl is an 8:1 band on a curved face: it needs
+     * many columns (only the front third shows), larger dots (the photo shrinks them), and a
+     * distinctive oversized MARKER dot at [i, j] so the grid position can't be ambiguous on a
+     * periodic cylinder.
+     */
+    grid?: {
+      NX: number;
+      NY: number;
+      margin: number;
+      radiusFrac: number;
+      marker: [number, number];
+    };
+    /**
+     * Mask (and gate) only |u - 0.5| <= this; the fit also uses dots one column beyond it. Beyond
+     * about 0.15 the cylinder foreshortens too hard for the polynomial (bowl, measured: fitting to
+     * |u - 0.5| <= 0.154 gives rms 0.99 px; to 0.132 gives 0.38 px).
+     */
+    fitDomainU?: number;
   }
 > = {
+  pet_bowl: {
+    pid: 678,
+    vid: 16785,
+    placement: "default",
+    technique: "sublimation",
+    category: "Flat / Front",
+    styleId: 6558,
+    grid: { NX: 41, NY: 5, margin: 0.06, radiusFrac: 0.03, marker: [20, 2] },
+    fitDomainU: 0.125,
+  },
   mug_11oz: {
     pid: 19,
     vid: 1320,
@@ -132,9 +163,10 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** Dot layout in VISIBLE-area coordinates, ~13 across with roughly square spacing, 6% margin. */
 const grid = (key: string) => {
   const p = PRINT_PRODUCTS[key],
-    NX = 13,
-    NY = Math.max(5, Math.round((13 * p.heightIn) / p.widthIn)),
-    M = 0.06;
+    o = TARGETS[key]?.grid,
+    NX = o?.NX ?? 13,
+    NY = o?.NY ?? Math.max(5, Math.round((13 * p.heightIn) / p.widthIn)),
+    M = o?.margin ?? 0.06;
   const dots: Array<{ u: number; v: number }> = [];
   for (let j = 0; j < NY; j++) {
     for (let i = 0; i < NX; i++) {
@@ -151,6 +183,9 @@ const grid = (key: string) => {
 
 /** Style ids for this variant; pick the one whose print-area shape matches the file (never mix portrait and landscape). */
 const styleFor = async (key: string) => {
+  if (TARGETS[key].styleId) {
+    return TARGETS[key].styleId as number;
+  }
   const t = TARGETS[key],
     s = outputSize(PRINT_PRODUCTS[key]);
   const res = await fetch(
@@ -256,13 +291,14 @@ const render = async (key: string, dir: string) => {
   const p = PRINT_PRODUCTS[key],
     s = outputSize(p),
     styleId = await styleFor(key);
-  const { dots } = grid(key),
-    r = Math.round(Math.min(s.visibleW, s.visibleH) * 0.012);
+  const { NX, dots } = grid(key),
+    o = TARGETS[key].grid,
+    r = Math.round(Math.min(s.visibleW, s.visibleH) * (o?.radiusFrac ?? 0.012));
   const circles = dots
-    .map(
-      (d) =>
-        `<circle cx="${(s.bleedPx + d.u * s.visibleW).toFixed(1)}" cy="${(s.bleedPx + d.v * s.visibleH).toFixed(1)}" r="${r}" fill="#000"/>`,
-    )
+    .map((d, k) => {
+      const isMarker = o && k === o.marker[1] * NX + o.marker[0];
+      return `<circle cx="${(s.bleedPx + d.u * s.visibleW).toFixed(1)}" cy="${(s.bleedPx + d.v * s.visibleH).toFixed(1)}" r="${isMarker ? Math.round(r * 1.7) : r}" fill="#000"/>`;
+    })
     .join("");
   const images: Record<string, ReturnType<typeof sharp>> = {
     white: sharp({
@@ -423,7 +459,7 @@ const fit = async (key: string, dir: string) => {
   // Dots: dark relative to the white render, inside solid coverage.
   const dark = new Float32Array(W * H),
     lab = new Int32Array(W * H),
-    found: Array<{ x: number; y: number; cut: boolean }> = [];
+    found: Array<{ x: number; y: number; cut: boolean; cnt: number }> = [];
   for (let i = 0; i < W * H; i++) {
     if (alpha[i] > 0.5) {
       dark[i] = Math.max(
@@ -474,7 +510,7 @@ const fit = async (key: string, dir: string) => {
         }
       }
       if (cnt >= 6) {
-        found.push({ x: sx / sw + 0.5, y: sy / sw + 0.5, cut });
+        found.push({ x: sx / sw + 0.5, y: sy / sw + 0.5, cut, cnt });
       }
     }
   }
@@ -574,7 +610,8 @@ const fit = async (key: string, dir: string) => {
   } else {
     const whole = found.filter((p) => !p.cut); // dots clipped by the outline have biased centroids
     const N = whole.length;
-    if (N < NX * NY * 0.4) {
+    const target = TARGETS[key];
+    if (N < (target.grid ? 30 : NX * NY * 0.4)) {
       throw new Error(
         `${key}: only ${N} whole dots visible — too little of the print shows to calibrate`,
       );
@@ -611,6 +648,24 @@ const fit = async (key: string, dir: string) => {
       v.map((q) => q[c]).sort((a, b) => a - b)[v.length >> 1];
     const mx = whole.reduce((t, p) => t + p.x, 0) / N,
       my = whole.reduce((t, p) => t + p.y, 0) / N;
+    // A marker grid anchors identity on its oversized dot (the largest blob, well above median).
+    let markerStart = -1;
+    if (target.grid) {
+      const sizes = whole.map((p) => p.cnt).sort((a, b) => a - b);
+      const medianCnt = sizes[sizes.length >> 1];
+      let big = 0;
+      for (let k = 1; k < N; k++) {
+        if (whole[k].cnt > whole[big].cnt) {
+          big = k;
+        }
+      }
+      if (whole[big].cnt < medianCnt * 2) {
+        throw new Error(
+          `${key}: marker dot not found (largest blob ${whole[big].cnt}px vs median ${medianCnt}px)`,
+        );
+      }
+      markerStart = big;
+    }
     let start = 0;
     for (let k = 1; k < N; k++) {
       if (
@@ -620,12 +675,42 @@ const fit = async (key: string, dir: string) => {
         start = k;
       }
     }
+    if (markerStart >= 0) {
+      start = markerStart;
+    }
     const lab: Array<[number, number] | null> = new Array(N).fill(null);
     const vecA: number[][] = new Array(N),
       vecB: number[][] = new Array(N);
     lab[start] = [0, 0];
     vecA[start] = [med(ax, 0), med(ax, 1)];
     vecB[start] = [med(ay, 0), med(ay, 1)];
+    if (target.grid) {
+      // A foreshortened grid has no single spacing: the median nearest-neighbour distance comes
+      // from the squeezed dots near the silhouette, and the vertical step can exceed 1.4x that, so
+      // global medians give wrong seed vectors (measured on the bowl: the walk labelled only the
+      // marker). Seed from the marker's own nearest right and lower neighbours instead.
+      const near = (want: (dx: number, dy: number) => boolean) => {
+        let b = -1,
+          bd = Infinity;
+        for (let k = 0; k < N; k++) {
+          const dx = whole[k].x - whole[start].x,
+            dy = whole[k].y - whole[start].y,
+            dd = Math.hypot(dx, dy);
+          if (k !== start && want(dx, dy) && dd < bd) {
+            bd = dd;
+            b = k;
+          }
+        }
+        if (b < 0) {
+          throw new Error(
+            `${key}: marker has no neighbour to seed the lattice`,
+          );
+        }
+        return [whole[b].x - whole[start].x, whole[b].y - whole[start].y];
+      };
+      vecA[start] = near((dx, dy) => dx > 0 && Math.abs(dx) > Math.abs(dy));
+      vecB[start] = near((dx, dy) => dy > 0 && Math.abs(dy) > Math.abs(dx));
+    }
     const queue = [start],
       taken = new Set(["0,0"]);
     while (queue.length) {
@@ -652,7 +737,11 @@ const fit = async (key: string, dir: string) => {
             best = k;
           }
         }
-        if (best < 0 || bd > 0.3 * sp || lab[best]) {
+        // Marker grids: tolerance scales with the local step, which shrinks toward the silhouette.
+        const tol = target.grid
+          ? 0.3 * Math.hypot(px - whole[a].x, py - whole[a].y)
+          : 0.3 * sp;
+        if (best < 0 || bd > tol || lab[best]) {
           continue;
         }
         lab[best] = [li + di, lj + dj];
@@ -685,8 +774,28 @@ const fit = async (key: string, dir: string) => {
       score: number;
       ps: typeof pairs;
     }> = [];
-    for (let oi = -imin; oi + imax <= NX - 1; oi++) {
-      for (let oj = -jmin; oj + jmax <= NY - 1; oj++) {
+    const offsets: Array<[number, number]> = [];
+    if (target.grid) {
+      offsets.push(target.grid.marker); // the marker was labelled (0,0)
+    } else {
+      for (let oi = -imin; oi + imax <= NX - 1; oi++) {
+        for (let oj = -jmin; oj + jmax <= NY - 1; oj++) {
+          offsets.push([oi, oj]);
+        }
+      }
+    }
+    for (const [oi, oj] of offsets) {
+      if (
+        imin + oi < 0 ||
+        imax + oi > NX - 1 ||
+        jmin + oj < 0 ||
+        jmax + oj > NY - 1
+      ) {
+        throw new Error(
+          `${key}: labelled dots fall outside the grid at offset ${oi},${oj}`,
+        );
+      }
+      {
         const ps = L.map((p) => {
           const g = dots[(p.j + oj) * NX + (p.i + oi)];
           return { x: p.x, y: p.y, u: g.u, v: g.v };
@@ -696,10 +805,14 @@ const fit = async (key: string, dir: string) => {
       }
     }
     scored.sort((a, b) => a.score - b.score);
+    if (target.grid) {
+      scored.splice(1); // the marker fixed the offset; nothing to disambiguate
+    }
     if (
-      !scored.length ||
-      scored[0].score > 0.02 ||
-      (scored[1] && scored[1].score < 0.05)
+      !target.grid &&
+      (!scored.length ||
+        scored[0].score > 0.02 ||
+        (scored[1] && scored[1].score < 0.05))
     ) {
       throw new Error(
         `${key}: grid position ambiguous (best centring ${scored[0]?.score.toFixed(3)}, next ${scored[1]?.score.toFixed(3)})`,
@@ -712,6 +825,9 @@ const fit = async (key: string, dir: string) => {
   // Refine: fit, then re-identify every usable dot through the fitted map. For shaped prints,
   // dots clipped by the outline are left out — their centroids are pulled inward.
   const usable = cornersVisible ? found : found.filter((p) => !p.cut);
+  const domainU = TARGETS[key].fitDomainU ?? Infinity;
+  const inDomain = (u: number) => Math.abs(u - 0.5) <= domainU + du;
+  pairs = pairs.filter((p) => inDomain(p.u));
   let cu: number[] = [],
     cv: number[] = [];
   for (let pass = 0; pass < 3; pass++) {
@@ -728,7 +844,9 @@ const fit = async (key: string, dir: string) => {
         return [];
       }
       const g = dots[j * NX + i];
-      return Math.abs(u - g.u) < du * 0.3 && Math.abs(v - g.v) < dv * 0.3
+      return inDomain(g.u) &&
+        Math.abs(u - g.u) < du * 0.3 &&
+        Math.abs(v - g.v) < dv * 0.3
         ? [{ x: p.x, y: p.y, u: g.u, v: g.v }]
         : [];
     });
@@ -748,10 +866,30 @@ const fit = async (key: string, dir: string) => {
   // are inset by the product's shape — that inset is a real print crop, reported below).
   const edges = edgesFor(cu, cv);
   const edgeTol = PRINT_PRODUCTS[key].bleedIn > 0 ? 0.25 : 0.05;
-  const need = cornersVisible ? NX * NY : usable.length;
-  const identityOk = cornersVisible
-    ? edges.every((e) => Math.abs(e) <= edgeTol)
-    : centring(edges) <= 0.02;
+  const need = cornersVisible
+    ? NX * NY
+    : // Judge the domain on the dot's grid column (as the pairing does), not its fitted u: a dot
+      // just outside the domain whose fitted u lands just inside can never be paired.
+      usable.filter((p) => {
+        const i = Math.round((evAt(cu, p.x, p.y) - dots[0].u) / du);
+        return inDomain(dots[Math.min(NX - 1, Math.max(0, i))].u);
+      }).length;
+  // A marker grid is anchored by its marker; its outline is the bowl's silhouette, not the art edge.
+  const identityOk = TARGETS[key].grid
+    ? true
+    : cornersVisible
+      ? edges.every((e) => Math.abs(e) <= edgeTol)
+      : centring(edges) <= 0.02;
+  if (Number.isFinite(domainU)) {
+    // Beyond the legible range the mockup keeps the blank photo rather than a badly fitted print.
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        if (alpha[y * W + x] > 0 && Math.abs(evAt(cu, x, y) - 0.5) > domainU) {
+          alpha[y * W + x] = 0;
+        }
+      }
+    }
+  }
   if (pairs.length < need * 0.95 || rms > 0.5 || max > 2.5 || !identityOk) {
     throw new Error(
       `${key}: calibration rejected (dots ${pairs.length}/${need}, rms ${rms.toFixed(2)}px, max ${max.toFixed(2)}px, edges ${edges.map((e) => e.toFixed(3)).join("/")}${cornersVisible ? "" : `, centring ${centring(edges).toFixed(3)}`})`,
