@@ -790,3 +790,10 @@ inside the pet-art box. The blurred band is featureless, so tile-shift NCC there
 offset there doesn't misrepresent the pet. Result: **cooler 5/5, pillow 5/5** on the art box (p95 ≤ 1.06 px,
 no art tile > 3 px). All >3 px tiles were in the blur band (pillow side bands u 0.14/0.87 near the seams;
 cooler tab at v 0.89), reported here rather than hidden. Every other product's print file is byte-identical.
+
+## Ceramic ornament re-check (2026-09-28)
+The ceramic's earlier 2/5 "fail" was judged on the full face. Split per the safe-area gate rule: on the
+**pet-art box all 5 pets pass** (p95 1.00 px, max ≤ 1.41 px, 96–104 tiles each); every failing tile was in
+the blurred band (p95 up to 4.1, max 8.5 px) — the known featureless-blur weakness. Printful's own renders of
+the real print files confirm the hanging hole lands in the blurred band above every pet's cap, and the whole
+pet sits uncropped inside the 2.76″ disc (pet ≈ 1.7″ tall). Added to the calibration registry; offered.
