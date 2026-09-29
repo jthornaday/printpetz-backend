@@ -27,7 +27,12 @@ import {
 import { getObjectFromS3, uploadFileToS3 } from "./aws_service";
 import { addErrorLog } from "./error_logs_service";
 import { mockupCalibrationFor, renderMockup } from "./merch_mockup_service";
-import { planPrintFile, renderPreview } from "./print_file_service";
+import {
+  personalizationFor,
+  planPrintFile,
+  PrintOptions,
+  renderPreview,
+} from "./print_file_service";
 
 /** Bump when print geometry or the preview render changes. Old previews are orphaned, not overwritten. */
 export const PREVIEW_VERSION = "v2"; // v2 2026-09-28: cooler + pillow safe-area layout
@@ -44,9 +49,35 @@ export const SHOP_PRODUCT_KEYS = [
   "ornament_ceramic_circle",
   "ornament_metal_oval",
   "card_4x6",
+  "pet_bowl",
 ] as const;
 const TREATMENTS: Treatment[] = ["panel", "cutout"];
 const PREVIEW_MAX_EDGE = 800;
+/** Bump when the band (name) layout changes, so name-bearing previews re-render. */
+const BAND_LAYOUT_VERSION = "b1";
+
+/** Band products (pet bowl) only have the full-scene design. */
+const treatmentsFor = (productKey: string): Treatment[] =>
+  PRINT_PRODUCTS[productKey]?.band ? ["panel"] : TREATMENTS;
+
+/** What a band preview depends on beyond the image: the printed name (or why none prints). */
+const personalizationEntry = (
+  productKey: string,
+  displayName: string | null | undefined,
+) => {
+  const pz = personalizationFor(productKey, displayName);
+  if (!pz) {
+    return undefined;
+  }
+  const nameKey = crypto
+    .createHash("sha256")
+    .update(
+      `${BAND_LAYOUT_VERSION}|${JSON.stringify(pz.lines ?? ["∅", pz.omitted])}`,
+    )
+    .digest("hex")
+    .slice(0, 12);
+  return { nameKey, lines: pz.lines, omitted: pz.omitted };
+};
 
 export type PreviewEntry = {
   productKey: string;
@@ -62,6 +93,12 @@ export type PreviewEntry = {
   mockup?: { url: string; width: number; height: number; calibration: string };
   /** Calibration id a mockup render failed for, so a broken render isn't retried on every poll. */
   mockupFailed?: string;
+  /** Band products: the name this preview prints (lines), or why none prints. Keyed so a changed name re-renders. */
+  personalization?: {
+    nameKey: string;
+    lines: string[] | null;
+    omitted?: string;
+  };
 };
 
 export type PreviewManifest = {
@@ -107,16 +144,24 @@ const writeManifest = async (m: PreviewManifest) => {
   });
 };
 
+const nameSuffix = (e: PreviewEntry) =>
+  e.personalization ? `-n${e.personalization.nameKey}` : "";
+
 const renderEntry = async (
   source: Buffer,
   srcSha: string,
   e: PreviewEntry,
+  opts: PrintOptions,
 ): Promise<PreviewEntry> => {
   try {
-    const plan = await planPrintFile(source, e.productKey, e.treatment);
-    const p = await renderPreview(plan, PREVIEW_MAX_EDGE);
+    const plan = await planPrintFile(source, e.productKey, e.treatment, opts);
+    // Band previews are wide (8:1); 800 px would blur the name, so they get their own width.
+    const p = await renderPreview(
+      plan,
+      PRINT_PRODUCTS[e.productKey]?.band?.previewWidth ?? PREVIEW_MAX_EDGE,
+    );
     const url = await uploadFileToS3({
-      Key: `${base(srcSha)}/${e.productKey}-${e.treatment}.${p.format === "png" ? "png" : "jpg"}`,
+      Key: `${base(srcSha)}/${e.productKey}-${e.treatment}${nameSuffix(e)}.${p.format === "png" ? "png" : "jpg"}`,
       buffer: p.buffer,
       fileType: p.format === "png" ? "image/png" : "image/jpeg",
     });
@@ -162,7 +207,7 @@ const renderMockupEntry = async (
     }
     const m = await renderMockup(cal, Buffer.from(await res.arrayBuffer()));
     const url = await uploadFileToS3({
-      Key: `${base(srcSha)}/${e.productKey}-${e.treatment}-mockup-${cal.id}.webp`,
+      Key: `${base(srcSha)}/${e.productKey}-${e.treatment}${nameSuffix(e)}-mockup-${cal.id}.webp`,
       buffer: m.buffer,
       fileType: "image/webp",
     });
@@ -192,7 +237,11 @@ const isComplete = (m: PreviewManifest) =>
 /** One background job per source per process. Another instance may duplicate it; rembg is cached in S3, so that costs little. */
 const running = new Map<string, Promise<void>>();
 
-const finishInBackground = (source: Buffer, manifest: PreviewManifest) => {
+const finishInBackground = (
+  source: Buffer,
+  manifest: PreviewManifest,
+  opts: PrintOptions,
+) => {
   if (running.has(manifest.srcSha)) {
     return;
   }
@@ -201,7 +250,7 @@ const finishInBackground = (source: Buffer, manifest: PreviewManifest) => {
       if (e.status === "ready") {
         continue;
       }
-      manifest.entries[i] = await renderEntry(source, manifest.srcSha, e);
+      manifest.entries[i] = await renderEntry(source, manifest.srcSha, e, opts);
       manifest.complete = isComplete(manifest);
       await writeManifest(manifest);
     }
@@ -243,24 +292,37 @@ const finishInBackground = (source: Buffer, manifest: PreviewManifest) => {
  */
 export const ensurePreviews = async (
   source: Buffer,
+  opts: PrintOptions = {},
 ): Promise<PreviewManifest> => {
   const srcSha = sha(source);
   let manifest = await readManifest(srcSha);
+  const newEntry = (
+    productKey: string,
+    treatment: Treatment,
+  ): PreviewEntry => ({
+    productKey,
+    treatment,
+    status: "pending",
+    trimmed: trimmedShare(productKey),
+    personalization: personalizationEntry(productKey, opts.displayName),
+  });
   if (manifest) {
+    // A band preview (pet bowl) whose printed name no longer matches is re-rendered in place.
+    manifest.entries = manifest.entries.map((e) => {
+      const pz = personalizationEntry(e.productKey, opts.displayName);
+      return pz && e.personalization?.nameKey !== pz.nameKey
+        ? newEntry(e.productKey, e.treatment)
+        : e;
+    });
     // Products added to the shop after this image's manifest was made get their entries now
     // (rendered by the background job below), so existing customers see new products too.
     const have = new Set(
       manifest.entries.map((e) => `${e.productKey}/${e.treatment}`),
     );
     for (const productKey of SHOP_PRODUCT_KEYS) {
-      for (const treatment of TREATMENTS) {
+      for (const treatment of treatmentsFor(productKey)) {
         if (!have.has(`${productKey}/${treatment}`)) {
-          manifest.entries.push({
-            productKey,
-            treatment,
-            status: "pending",
-            trimmed: trimmedShare(productKey),
-          });
+          manifest.entries.push(newEntry(productKey, treatment));
         }
       }
     }
@@ -272,12 +334,9 @@ export const ensurePreviews = async (
       version: PREVIEW_VERSION,
       updatedAt: "",
       entries: SHOP_PRODUCT_KEYS.flatMap((productKey) =>
-        TREATMENTS.map((treatment) => ({
-          productKey,
-          treatment,
-          status: "pending" as const,
-          trimmed: trimmedShare(productKey),
-        })),
+        treatmentsFor(productKey).map((treatment) =>
+          newEntry(productKey, treatment),
+        ),
       ),
     };
     // Full-scene previews with a mild crop need no rembg: render them now (ms each).
@@ -285,7 +344,7 @@ export const ensurePreviews = async (
     await Promise.all(
       m.entries.map(async (e, i) => {
         if (!needsRembg(e.productKey, e.treatment)) {
-          m.entries[i] = await renderEntry(source, srcSha, e);
+          m.entries[i] = await renderEntry(source, srcSha, e, opts);
         }
       }),
     );
@@ -295,7 +354,7 @@ export const ensurePreviews = async (
   if (manifest.entries.some((e) => e.status !== "ready" || needsMockup(e))) {
     // Failed entries get retried too — a transient rembg failure shouldn't be permanent.
     // Manifests made before a product was calibrated pick up their mockups here.
-    finishInBackground(source, manifest);
+    finishInBackground(source, manifest, opts);
   }
   return { ...manifest, complete: isComplete(manifest) };
 };

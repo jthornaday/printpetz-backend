@@ -222,3 +222,27 @@ export const handleModelTrainingResponse = async (
 
   return true;
 };
+
+/**
+ * The pet's DISPLAY name for printing on merch (pet bowl), or null. Only `pet_name` — never the
+ * internal model name (the "two names" rule: "Max 2" must never print). Deliberately ignores
+ * `is_deleted`: a customer who deletes a pet after paying still gets the bowl they saw.
+ */
+export const getPetNameForPrint = async (
+  modelId: number,
+): Promise<string | null> => {
+  const { data, error } = await retrySupabase<{ pet_name: string | null }>(
+    async () =>
+      await supabase
+        .from(tables.models)
+        .select("pet_name")
+        .eq("id", modelId)
+        .single(),
+  );
+  if (error) {
+    throw new Error(
+      `pet name lookup failed for model ${modelId}: ${error.message}`,
+    );
+  }
+  return data?.pet_name ?? null;
+};

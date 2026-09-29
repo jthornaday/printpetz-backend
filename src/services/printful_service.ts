@@ -16,7 +16,10 @@ import { variantForProduct } from "@/constants/printful_variants";
 
 import { addErrorLog } from "./error_logs_service";
 import { uploadFileToS3 } from "./aws_service";
-import { buildPrintFile } from "./print_file_service";
+import { getGenerationById } from "./generation_service";
+import { getPetNameForPrint } from "./model_service";
+import { buildPrintFile, PrintOptions } from "./print_file_service";
+import { PRINT_PRODUCTS } from "@/constants/print_products";
 
 const API = "https://api.printful.com";
 
@@ -126,7 +129,19 @@ const preparePrintFile = async (item: FulfillmentItem, externalId: string, index
   }
   const source = Buffer.from(await res.arrayBuffer());
 
-  const built = await buildPrintFile(source, item.productKey, item.treatment);
+  // Products that print the pet's name look it up here, server-side, from the generation — never
+  // from the cart. The cart's generation id must belong to the cart's image, or a crafted cart
+  // could print another customer's pet name. Spec: merch-pet-bowl.md, Decision 1.
+  const opts: PrintOptions = {};
+  if (PRINT_PRODUCTS[item.productKey]?.band) {
+    const generation = await getGenerationById(Number(item.generationId));
+    if (!generation || generation.image !== item.sourceImageUrl) {
+      throw new Error(`generation ${item.generationId} does not match the ordered image ${item.sourceImageUrl}`);
+    }
+    opts.displayName = await getPetNameForPrint(generation.model_id);
+  }
+
+  const built = await buildPrintFile(source, item.productKey, item.treatment, opts);
 
   const key = `${PRINT_FILE_PREFIX}/${externalId}/${index}-${item.productKey}-${item.treatment}.${built.format === "png" ? "png" : "jpg"}`;
   const url = await uploadFileToS3({
@@ -202,7 +217,7 @@ export const createFulfillmentOrder = async (req: FulfillmentRequest) => {
   }
 
   // Traceability: a complaint about the wrong pet must be answerable with one grep.
-  for (const { item, url } of prepared) {
+  for (const { item, url, built } of prepared) {
     console.log(
       "[printful-order]",
       JSON.stringify({
@@ -212,6 +227,7 @@ export const createFulfillmentOrder = async (req: FulfillmentRequest) => {
         productKey: item.productKey,
         printfulVariantId: item.printfulVariantId ?? variantForProduct(item.productKey).variantId,
         treatment: item.treatment,
+        printedName: built.printedName,
         fileUrl: url,
       }),
     );
