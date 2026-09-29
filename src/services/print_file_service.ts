@@ -25,6 +25,7 @@ import {
 } from "@/constants/print_products";
 import { getObjectFromS3, uploadFileToS3 } from "./aws_service";
 import { handleRemoveBackground } from "./fal_service";
+import { capHeightEm, fitName, lineWidth, linePathData, NameOmitted, printableName } from "./name_text";
 
 const CACHE_DIR = path.join(process.cwd(), "Claude outputs", ".print-cache");
 /**
@@ -45,7 +46,17 @@ export type PrintFileResult = {
   usedSubjectCrop: boolean;
   subjectBbox: { left: number; top: number; width: number; height: number } | null;
   notes: string[];
+  /** The name actually printed (band products), or null when none was printed. */
+  printedName: string | null;
 };
+
+/** Per-order inputs beyond the image. Only products that print the name use it. */
+export type PrintOptions = { displayName?: string | null };
+
+/** How the name will print on a band product, decided once in the plan. */
+export type Personalization =
+  | { lines: string[]; fontPx: number; omitted?: undefined }
+  | { lines: null; fontPx: 0; omitted: NameOmitted };
 
 const sha = (b: Buffer) => crypto.createHash("sha256").update(b).digest("hex").slice(0, 32);
 
@@ -154,12 +165,30 @@ export type PrintPlan = {
   size: ReturnType<typeof outputSize>;
   subjectBbox: PrintFileResult["subjectBbox"];
   notes: string[];
+  /** Band products only: the name layout both the print and the preview use. */
+  personalization: Personalization | null;
+};
+
+const personalize = (product: PrintProduct, opts?: PrintOptions): Personalization | null => {
+  if (!product.band) {
+    return null;
+  }
+  const clean = printableName(opts?.displayName);
+  if ("omitted" in clean) {
+    return { lines: null, fontPx: 0, omitted: clean.omitted };
+  }
+  const L = product.band.lockup;
+  const H = Math.round(product.heightIn * product.dpi);
+  const portraitW = Math.round(H * product.band.portraitHeight * product.band.portraitAspect);
+  const fit = fitName(clean.name, { maxWidthPx: L.maxWidthPx - portraitW - L.gapPx, maxFontPx: L.maxFontPx, twoLineMaxFontPx: L.twoLineMaxFontPx, minFontPx: L.minFontPx, tracking: L.tracking });
+  return "omitted" in fit ? { lines: null, fontPx: 0, omitted: fit.omitted } : { lines: fit.lines, fontPx: fit.fontPx };
 };
 
 export const planPrintFile = async (
   input: Buffer,
   productKey: string,
   treatment: Treatment = "panel",
+  opts?: PrintOptions,
 ): Promise<PrintPlan> => {
   const product = PRINT_PRODUCTS[productKey];
   if (!product) {
@@ -196,7 +225,7 @@ export const planPrintFile = async (
   const srcW = meta.width ?? 0, srcH = meta.height ?? 0;
   const win = cropWindow(srcW, srcH, artAspect(product), subjectBbox);
 
-  return { product, treatment, working, win, size, subjectBbox, notes };
+  return { product, treatment, working, win, size, subjectBbox, notes, personalization: personalize(product, opts) };
 };
 
 /** Crop to the plan's window, then one Lanczos pass to the requested size. */
@@ -212,7 +241,55 @@ const renderAt = (plan: PrintPlan, width: number, height: number) =>
  * scales with size so the preview and the print look alike. Used by BOTH the print file and
  * the shop preview — one layout, so what the customer sees is what prints.
  */
+/**
+ * Wrap-around band (pet bowl): white, a portrait + name lockup centred on the front, portraits at
+ * the sides — or portraits only when the name can't print. Everything is placed in print-file
+ * pixels and scaled, so a preview is the same layout. Throws if anything reaches the seam.
+ */
+const renderBand = async (plan: PrintPlan, width: number, height: number) => {
+  const band = plan.product.band!;
+  const L = band.lockup;
+  const FW = Math.round(plan.product.widthIn * plan.product.dpi), FH = Math.round(plan.product.heightIn * plan.product.dpi);
+  const k = width / FW; // print-file px -> output px
+  const phF = Math.round(FH * band.portraitHeight), pwF = Math.round(phF * band.portraitAspect);
+  const ph = Math.round(phF * k), pw = Math.round(pwF * k), r = Math.round(ph * 0.06);
+  const mask = Buffer.from(`<svg width="${pw}" height="${ph}"><rect width="${pw}" height="${ph}" rx="${r}" ry="${r}" fill="#fff"/></svg>`);
+  const portrait = await sharp(await renderAt(plan, pw, ph).png().toBuffer()).composite([{ input: mask, blend: "dest-in" }]).png().toBuffer();
+  const topF = (FH - phF) / 2;
+  const items: Array<{ leftF: number; widthF: number }> = [];
+  const layers: Array<{ input: Buffer; left: number; top: number }> = [];
+  const addPortrait = (centreF: number) => {
+    const leftF = centreF - pwF / 2;
+    items.push({ leftF, widthF: pwF });
+    layers.push({ input: portrait, left: Math.round(leftF * k), top: Math.round(topF * k) });
+  };
+  const pz = plan.personalization;
+  if (pz && pz.lines) {
+    const textW = Math.max(...pz.lines.map((l) => lineWidth(l, pz.fontPx, L.tracking)));
+    const lockW = pwF + L.gapPx + textW, lockLeft = FW / 2 - lockW / 2;
+    addPortrait(lockLeft + pwF / 2);
+    const cap = capHeightEm() * pz.fontPx, gap = 0.3 * pz.fontPx;
+    const blockH = pz.lines.length * cap + (pz.lines.length - 1) * gap;
+    const firstBase = FH / 2 - blockH / 2 + cap;
+    const x = lockLeft + pwF + L.gapPx;
+    const d = pz.lines.map((line, i) => linePathData(line, x, firstBase + i * (cap + gap), pz.fontPx, L.tracking)).join("");
+    items.push({ leftF: x, widthF: textW });
+    layers.push({ input: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><g transform="scale(${k})"><path d="${d}" fill="${L.color}"/></g></svg>`), left: 0, top: 0 });
+    band.sideCentres.forEach((c) => addPortrait(FW / 2 + c * FW));
+  } else {
+    band.fallbackCentres.forEach((c) => addPortrait(FW / 2 + c * FW));
+  }
+  const minX = Math.min(...items.map((i) => i.leftF)), maxX = Math.max(...items.map((i) => i.leftF + i.widthF));
+  if (minX < band.seamClearancePx || maxX > FW - band.seamClearancePx) {
+    throw new Error(`band layout reaches the seam (${Math.round(minX)}..${Math.round(maxX)} of ${FW})`);
+  }
+  return sharp({ create: { width, height, channels: 3, background: "#ffffff" } }).composite(layers);
+};
+
 const renderFace = async (plan: PrintPlan, width: number, height: number) => {
+  if (plan.product.band) {
+    return renderBand(plan, width, height);
+  }
   const safe = plan.product.safeArea;
   if (!safe) {
     return renderAt(plan, width, height);
@@ -234,8 +311,9 @@ export const buildPrintFile = async (
   input: Buffer,
   productKey: string,
   treatment: Treatment = "panel",
+  opts?: PrintOptions,
 ): Promise<PrintFileResult> => {
-  const plan = await planPrintFile(input, productKey, treatment);
+  const plan = await planPrintFile(input, productKey, treatment, opts);
   const { product, size, subjectBbox, notes } = plan;
 
   // 4. One Lanczos pass to final visible size.
@@ -268,6 +346,7 @@ export const buildPrintFile = async (
     usedSubjectCrop: Boolean(subjectBbox),
     subjectBbox,
     notes,
+    printedName: plan.personalization?.lines?.join(" ") ?? null,
   };
 };
 

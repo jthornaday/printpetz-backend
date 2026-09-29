@@ -67,6 +67,10 @@ export const PRINTFUL_VARIANTS: Record<string, PrintfulVariant> = {
     variantId: 23135, productId: 901,
     label: "Metal Christmas Ornament — White aluminum / Oval", priceUsdAtLookup: 4.61,
   },
+  pet_bowl: {
+    variantId: 16785, productId: 678,
+    label: "Pet Bowl — White / 18 oz (32 oz is 16786, same printfile)", priceUsdAtLookup: 21.92,
+  },
   card_4x6: {
     variantId: 14457, productId: 568,
     label: "Greeting Card — 4″×6″ (envelope included)", priceUsdAtLookup: 2.55,

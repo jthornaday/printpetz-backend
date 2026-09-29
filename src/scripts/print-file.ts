@@ -56,7 +56,8 @@ const main = async () => {
   }
 
   const started = Date.now();
-  const r = await buildPrintFile(fs.readFileSync(image), product, treatment);
+  // --name= prints a display name on products that carry one (pet bowl); ignored elsewhere.
+  const r = await buildPrintFile(fs.readFileSync(image), product, treatment, { displayName: arg("name") ?? null });
 
   fs.mkdirSync(outDir, { recursive: true });
   const base = path.basename(image).replace(/\.[^.]+$/, "");
