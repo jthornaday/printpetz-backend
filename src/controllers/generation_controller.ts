@@ -12,6 +12,7 @@ import {
   countUnfinishedGenerations,
   getGenerationById,
   providerColumns,
+  updateGeneration,
   uploadGenerationImageBuffer,
 } from "@/services/generation_service";
 import { getModelById } from "@/services/model_service";
@@ -19,7 +20,8 @@ import { getImageProvider } from "@/services/providers";
 import { logOpenAIFailure } from "@/services/providers/openai_provider";
 import { getCustomStyle, getStyleById } from "@/services/style_service";
 import { checkTrademarkViolation } from "@/services/trademark_service";
-import { updateUserCredit } from "@/services/user_service";
+import { availableCredits, spendCredits } from "@/services/user_service";
+import { IGeneration } from "@/types/generation";
 import { EGenerationStatus } from "@/types/generation";
 import { ImageGenerationFailure } from "@/types/image_provider";
 import errorResponse from "@/utils/errors/errorResponse";
@@ -55,7 +57,9 @@ const getImageSeed = (baseSeed: number | undefined, imageIndex: number) =>
 // look reproducible and quietly not be.
 const readFixedSeed = () => {
   const raw = process.env.PRINTPETZ_FIXED_SEED;
-  if (raw === undefined || raw.trim() === "") return undefined;
+  if (raw === undefined || raw.trim() === "") {
+    return undefined;
+  }
 
   const parsed = Number(raw);
   if (!Number.isInteger(parsed) || parsed < 0 || parsed >= SEED_RANGE) {
@@ -71,7 +75,9 @@ const readFixedSeed = () => {
 
 const getBaseSeed = (requestSeed: number | undefined) => {
   const fixedSeed = readFixedSeed();
-  if (fixedSeed === undefined) return requestSeed;
+  if (fixedSeed === undefined) {
+    return requestSeed;
+  }
 
   if (requestSeed !== undefined && requestSeed !== fixedSeed) {
     // eslint-disable-next-line no-console
@@ -142,7 +148,9 @@ const getGenerationSubject = (
     variantOffset + imageIndex,
     styleName,
   );
-  if (!variant) return subject;
+  if (!variant) {
+    return subject;
+  }
 
   // The variant lands as its own sentence after the theme block, so the
   // background and quality tail stay where the theme put them. Capitalised
@@ -151,13 +159,53 @@ const getGenerationSubject = (
   return `${subjectWithStop} ${variant[0].toUpperCase()}${variant.slice(1)}`;
 };
 
+/**
+ * Charge each saved image on its own ledger row (free credits first), so a refund or the watermark
+ * can tell exactly what that image cost. The up-front balance check makes a short balance here
+ * rare (a race with another spend); such a row is failed instead of left to run unpaid. Returns
+ * the rows as the frontend should see them.
+ */
+const chargeEach = async <G extends Pick<IGeneration, "id"> | null>(
+  userId: string,
+  generations: G[],
+) => {
+  const out: G[] = [];
+  for (const generation of generations) {
+    if (!generation) {
+      out.push(generation);
+      continue;
+    }
+    const spend = await spendCredits(
+      userId,
+      AppConstants.imageGenerationCredit,
+      "generation",
+      String(generation.id),
+    );
+    if (spend) {
+      out.push(generation);
+      continue;
+    }
+    const error = {
+      reason: "insufficient_credits",
+      message: "Not enough credits for this image",
+    };
+    await updateGeneration({
+      id: generation.id,
+      status: EGenerationStatus.ERROR,
+      error,
+    });
+    out.push({ ...generation, status: EGenerationStatus.ERROR, error });
+  }
+  return out;
+};
+
 const createImage = AsyncHandler.handle(async (req, res) => {
   const user = req.user;
   const { numberOfImages, styleId, modelId, cutenessLevel, seed } =
     generateImageSchema.parse(req.body);
 
   const generationCharge = AppConstants.imageGenerationCredit * numberOfImages;
-  const hasEnoughCredit = user.credits >= generationCharge;
+  const hasEnoughCredit = availableCredits(user) >= generationCharge;
 
   if (!hasEnoughCredit) {
     throw errorResponse.Api403Error({
@@ -280,13 +328,9 @@ const createImage = AsyncHandler.handle(async (req, res) => {
     // Charged up front and refunded on failure, exactly as the FAL lane
     // already does from its webhook. One billing model, one refund path, and
     // no way to queue work you cannot afford.
-    await updateUserCredit(
-      user.id,
-      AppConstants.imageGenerationCredit * generations.length,
-      false,
-    );
-
-    res.dataCreateSuccess({ data: { generations } });
+    res.dataCreateSuccess({
+      data: { generations: await chargeEach(user.id, generations) },
+    });
     return;
   }
 
@@ -388,15 +432,12 @@ const createImage = AsyncHandler.handle(async (req, res) => {
   );
 
   const generations = results.map((result) => result.generation);
-  const billableCount = results.filter((result) => result.billable).length;
-
-  if (billableCount > 0) {
-    await updateUserCredit(
-      user.id,
-      AppConstants.imageGenerationCredit * billableCount,
-      false,
-    );
-  }
+  await chargeEach(
+    user.id,
+    results
+      .filter((result) => result.billable)
+      .map((result) => result.generation),
+  );
 
   res.dataCreateSuccess({ data: { generations } });
 });
@@ -422,7 +463,7 @@ const createCustomImage = AsyncHandler.handle(async (req, res) => {
   }
 
   const generationCharge = AppConstants.imageGenerationCredit * numberOfImages;
-  if (user.credits < generationCharge) {
+  if (availableCredits(user) < generationCharge) {
     throw errorResponse.Api403Error({
       errorDescription: "You don`t have sufficient credits to generate image",
     });
@@ -504,13 +545,9 @@ const createCustomImage = AsyncHandler.handle(async (req, res) => {
     });
   }
 
-  await updateUserCredit(
-    user.id,
-    AppConstants.imageGenerationCredit * generations.length,
-    false,
-  );
-
-  res.dataCreateSuccess({ data: { generations } });
+  res.dataCreateSuccess({
+    data: { generations: await chargeEach(user.id, generations) },
+  });
 });
 
 const downloadImage = AsyncHandler.handle(async (req, res) => {

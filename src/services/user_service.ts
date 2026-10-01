@@ -88,27 +88,99 @@ export const updateUser = async (input: Partial<IUser>) => {
   return data;
 };
 
+/** Everything the user can spend: free starter credits plus paid ones. */
+export const availableCredits = (
+  user: Pick<IUser, "credits" | "free_credits">,
+) => user.credits + (user.free_credits ?? 0);
+
+export type CreditSpend = { freeSpent: number; paidSpent: number };
+
 /**
- * Update user`s credits
- * @param userId - The ID of the user
- * @param credits - The number of credits to update
- * @param isInc - Whether to increment or decrement the credits
- * @returns True if the user was updated, otherwise false
+ * Spend credits atomically, free ones first (Postgres `spend_credits`, one locked row). Returns the
+ * split, or null if the balance is short. Idempotent per (kind, ref): retrying a charge returns
+ * the original split without charging twice. Throws if the database call itself fails.
  */
-export const updateUserCredit = async (
+export const spendCredits = async (
   userId: string,
-  credits: number,
-  isInc = false,
+  amount: number,
+  kind: "training" | "generation",
+  ref: string,
+): Promise<CreditSpend | null> => {
+  const { data, error } = await supabase.rpc("spend_credits", {
+    p_user: userId,
+    p_amount: amount,
+    p_kind: kind,
+    p_ref: ref,
+  });
+  if (error) {
+    addErrorLog({
+      error: JSON.stringify(error),
+      input: JSON.stringify({ userId, amount, kind, ref }),
+      type: "SPEND_CREDITS",
+    });
+    throw new Error(`spend_credits failed: ${error.message}`);
+  }
+  const row = (
+    data as Array<{ free_spent: number; paid_spent: number }> | null
+  )?.[0];
+  return row ? { freeSpent: row.free_spent, paidSpent: row.paid_spent } : null;
+};
+
+/**
+ * Give back exactly what a spend took (free to free, paid to paid). Safe to call twice: the second
+ * call returns false. A charge from before the ledger existed is returned as `fallbackPaid` paid
+ * credits. Never throws: a failed refund is logged for follow-up.
+ */
+export const refundCharge = async (
+  userId: string,
+  kind: "training" | "generation",
+  ref: string,
+  fallbackPaid: number,
 ) => {
-  const user = await getUser(userId);
-  if (!user) {
+  const { data, error } = await supabase.rpc("refund_charge", {
+    p_user: userId,
+    p_kind: kind,
+    p_ref: ref,
+    p_fallback_paid: fallbackPaid,
+  });
+  if (error) {
+    addErrorLog({
+      error: JSON.stringify(error),
+      input: JSON.stringify({ userId, kind, ref, fallbackPaid }),
+      type: "REFUND_CREDITS",
+    });
     return false;
   }
+  return data === true;
+};
 
-  const multiplier = isInc ? 1 : -1;
-  const updatedCredits = user.credits + credits * multiplier;
-
-  await updateUser({ id: userId, credits: updatedCredits });
-
-  return true;
+/**
+ * Add purchased credits once per Stripe checkout session. `applied` is false for a redelivered
+ * webhook; `firstPurchase` drives the starter-image unlock.
+ */
+export const addPaidCredits = async (
+  userId: string,
+  amount: number,
+  sessionId: string,
+) => {
+  const { data, error } = await supabase.rpc("add_paid_credits", {
+    p_user: userId,
+    p_amount: amount,
+    p_ref: sessionId,
+  });
+  if (error) {
+    addErrorLog({
+      error: JSON.stringify(error),
+      input: JSON.stringify({ userId, amount, sessionId }),
+      type: "ADD_PAID_CREDITS",
+    });
+    throw new Error(`add_paid_credits failed: ${error.message}`);
+  }
+  const row = (
+    data as Array<{ applied: boolean; first_purchase: boolean }> | null
+  )?.[0];
+  return {
+    applied: Boolean(row?.applied),
+    firstPurchase: Boolean(row?.first_purchase),
+  };
 };
