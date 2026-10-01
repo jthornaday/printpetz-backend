@@ -13,7 +13,8 @@
     "print-file": "node -r module-alias/register lib/scripts/print-file.js",
     "replay-order": "node -r module-alias/register lib/scripts/replay-order.js",
     "merch-demo": "node -r module-alias/register lib/scripts/merch-demo.js",
-    "merch-calibrate": "node -r module-alias/register lib/scripts/merch-calibrate.js"
+    "merch-calibrate": "node -r module-alias/register lib/scripts/merch-calibrate.js",
+    "bowl-check": "node -r module-alias/register lib/scripts/bowl-check.js"
   },
   "keywords": [
     "Pet",
