@@ -13,7 +13,7 @@ import {
 import { getModelById } from "./model_service";
 import { getStyleById } from "./style_service";
 import { getImageProvider } from "./providers";
-import { updateUserCredit } from "./user_service";
+import { refundCharge } from "./user_service";
 
 /**
  * Drains queued generations off the request thread.
@@ -62,10 +62,11 @@ const workerId = `${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
 let running = false;
 
 const refund = async (generation: IGeneration) => {
-  await updateUserCredit(
+  await refundCharge(
     generation.user_id,
+    "generation",
+    String(generation.id),
     AppConstants.imageGenerationCredit,
-    true,
   );
 };
 

@@ -9,6 +9,7 @@ import {
   priceObjectFromStripeEvent,
 } from "@/utils/stripe_utils";
 
+import { addErrorLog } from "./error_logs_service";
 import {
   createPrice,
   deletePrice,
@@ -16,7 +17,12 @@ import {
   updatePrice,
 } from "./price_service";
 import { addPurchase } from "./purchase_service";
-import { getUser, getUserByStripeCustomerId, updateUser } from "./user_service";
+import {
+  addPaidCredits,
+  getUser,
+  getUserByStripeCustomerId,
+  updateUser,
+} from "./user_service";
 
 type CheckoutSessionProps = {
   price: IPrice;
@@ -149,20 +155,38 @@ export const handleCheckout = async (
     });
   }
 
+  // Cards complete as "paid". Anything else (a delayed bank payment) hasn't been paid yet, so no
+  // credits: those would arrive with checkout.session.async_payment_succeeded, which we don't
+  // offer today.
+  if (checkoutSessionObject.payment_status !== "paid") {
+    addErrorLog({
+      input: JSON.stringify({ sessionId: checkoutSessionObject.id, userId }),
+      error: JSON.stringify({
+        payment_status: checkoutSessionObject.payment_status,
+      }),
+      type: "STRIPE_CHECKOUT_NOT_PAID",
+    });
+    return;
+  }
+
   const transactionId = checkoutSessionObject.payment_intent;
   const amount = checkoutSessionObject.amount_total / 100;
+  const purchased = credits ? Number(credits) : 0;
 
-  await Promise.all([
-    addPurchase({
-      user_id: userId,
-      transaction_id: transactionId as string,
-      credits: credits ? Number(credits) : 0,
-      amount,
-      currency: checkoutSessionObject.currency,
-    }),
-    updateUser({
-      id: userId,
-      credits: user.credits + (credits ? Number(credits) : 0),
-    }),
-  ]);
+  // Once per checkout session: a redelivered webhook changes nothing.
+  const { applied } = await addPaidCredits(
+    userId,
+    purchased,
+    checkoutSessionObject.id,
+  );
+  if (!applied) {
+    return;
+  }
+  await addPurchase({
+    user_id: userId,
+    transaction_id: transactionId as string,
+    credits: purchased,
+    amount,
+    currency: checkoutSessionObject.currency,
+  });
 };

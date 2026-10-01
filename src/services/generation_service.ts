@@ -30,7 +30,7 @@ import errorResponse from "@/utils/errors/errorResponse";
 import { uploadFileToS3 } from "./aws_service";
 import { addErrorLog } from "./error_logs_service";
 import { getFileBufferFromUrl } from "./file_service";
-import { updateUserCredit } from "./user_service";
+import { refundCharge } from "./user_service";
 
 // provider and provider_model are labels, added by
 // add-generations-provider-columns.sql. If PRINTPETZ_PROVIDER_COLUMNS is on
@@ -345,10 +345,11 @@ export const handleImageGenerationResponse = async (
         status: EGenerationStatus.ERROR,
         error: payload?.details?.[0],
       }),
-      updateUserCredit(
+      refundCharge(
         generation.user_id,
+        "generation",
+        String(generation.id),
         AppConstants.imageGenerationCredit,
-        true,
       ),
     ]);
 
