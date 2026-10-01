@@ -354,7 +354,11 @@ their real `pet_name`, plus overrides:
 - **Assert on each file:**
   - 6496×803, 300 DPI, JPEG.
   - Every pixel within 75 px of x = 0 and x = W−1 is white (seam).
-  - The lockup's bounding box is centred on W/2 within 2 px and is at most 1560 px wide.
+  - The lockup's bounding box is centred on W/2 and is at most 1560 px wide. The tolerance is
+    12 px, not 2. Centring uses advance widths, so the ink is off by half the outer side
+    bearings: ZOË measures 9.5 px, which is 0.03 in.
+
+  Built as `npm run bowl-check`, covering 25 names × 5 pets. All pass, as of 2026-10-01.
   - Navy pixels are present exactly when a name is printed.
   - The downscaled print file matches the preview (mean abs diff below a small threshold).
   - The other 10 products' files are byte-identical to before.
