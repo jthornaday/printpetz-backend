@@ -8,6 +8,7 @@ import app from "./app";
 import AppConstants from "./constants/app_constants";
 import { startGenerationWorker } from "./services/generation_worker";
 import { startOrderSweeper } from "./services/merch_order_service";
+import { startShipmentWatcher } from "./services/order_tracking_service";
 import { startPrintfulWatcher } from "./services/printful_watch";
 
 app.listen(AppConstants.port, async () => {
@@ -26,4 +27,7 @@ app.listen(AppConstants.port, async () => {
 
   // Retries paid Shopify orders left unfinished, e.g. by a restart mid-order (A2, part 2).
   startOrderSweeper();
+
+  // Emails customers their tracking link once per package (B1).
+  startShipmentWatcher();
 });
