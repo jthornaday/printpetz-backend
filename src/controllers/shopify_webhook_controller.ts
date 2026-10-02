@@ -15,10 +15,11 @@ import { PRINT_PRODUCTS, Treatment } from "@/constants/print_products";
 import { printfulVariantForShopify } from "@/constants/printful_variants";
 import AppConstants from "@/constants/app_constants";
 import {
-  createFulfillmentOrder, FulfillmentItem, FulfillmentRequest, PrintfulRecipient,
+  FulfillmentItem, FulfillmentRequest, PrintfulRecipient,
 } from "@/services/printful_service";
 import { addErrorLog } from "@/services/error_logs_service";
 import { sendAlert } from "@/services/alert_service";
+import { attemptFulfillment, recordOrder, recordUnfulfillable } from "@/services/merch_order_service";
 
 type RawBodyRequest = Request & { rawbody?: string };
 
@@ -175,64 +176,35 @@ export const shopifyOrderPaid = async (req: RawBodyRequest, res: Response) => {
       ],
       `unfulfillable-${order?.id}`,
     );
+    void recordUnfulfillable(order ?? {}, message);
     return res.status(200).json({ ok: false, ignored: true, reason: message });
+  }
+
+  // Record the order before answering Shopify, so it survives anything that happens next (a
+  // restart mid-order used to lose it silently). If the record can't be written, answer 500 and
+  // Shopify redelivers. A redelivery of an order we already have is acknowledged and left to the
+  // first delivery or the sweep.
+  let isNew: boolean;
+  try {
+    isNew = await recordOrder(order, request);
+  } catch (error) {
+    console.error("[shopify-webhook] could not record order", JSON.stringify({ shopifyOrderId: order?.id, message: (error as Error).message }));
+    return res.status(500).json({ error: "could not record order" });
   }
 
   // Answer Shopify now. It waits 5 seconds, and building a print file (cutout calls
   // background removal, 4-18s) plus S3 plus Printful routinely takes longer. Work
-  // continues below; the Printful external_id lookup keeps any retry from duplicating.
-  res.status(200).json({ ok: true, accepted: true, shopifyOrderId: order.id, test: request.forceDraft });
+  // continues below; failures retry via the merch_orders sweep, and the Printful
+  // external_id lookup keeps any retry from duplicating.
+  res.status(200).json({ ok: true, accepted: true, shopifyOrderId: order.id, test: request.forceDraft, duplicate: !isNew });
 
-  void processFulfillment(request, order);
-};
-
-/**
- * Runs after the response. Shopify will NOT retry a failure here, so failures are
- * logged with everything needed to replay the order by hand
- * (`npm run replay-order -- --file=<order.json>`).
- */
-const processFulfillment = async (request: FulfillmentRequest, order: any) => {
-  try {
-    const result = await createFulfillmentOrder(request);
-    if (!result.created) {
-      console.log(
-        "[shopify-webhook] duplicate suppressed",
-        JSON.stringify({ shopifyOrderId: order.id, printfulOrderId: result.orderId }),
-      );
-      return;
-    }
-    console.log(
-      "[shopify-webhook] fulfilled",
-      JSON.stringify({
-        shopifyOrderId: order.id,
-        printfulOrderId: result.orderId,
-        status: result.status,
-        confirmed: result.confirmed,
-        test: request.forceDraft,
-      }),
-    );
-  } catch (error) {
-    console.error(
-      "[shopify-webhook] FULFILMENT FAILED after acknowledging Shopify",
-      JSON.stringify({ shopifyOrderId: order?.id, message: (error as Error).message }),
-    );
-    addErrorLog({
-      // The full request, so the order can be replayed without the Shopify admin.
-      input: JSON.stringify({ shopifyOrderId: order?.id, request }),
-      error: JSON.stringify({ message: (error as Error).message }),
-      type: "SHOPIFY_FULFILLMENT_FAILED",
+  if (isNew) {
+    void attemptFulfillment({
+      shopify_order_id: String(order.id),
+      order_name: order?.name ?? null,
+      request,
+      attempts: 1,
+      test: request.forceDraft,
     });
-    void sendAlert(
-      `Paid order ${order?.name ?? order?.id} failed to reach Printful`,
-      [
-        `Shopify order ${order?.name ?? ""} (id ${order?.id}) was paid, but creating its Printful order failed.`,
-        `Error: ${(error as Error).message}`,
-        "",
-        "The full request is in error_logs (type SHOPIFY_FULFILLMENT_FAILED) and can be replayed with",
-        "npm run replay-order. Until then nothing prints for this customer.",
-        request.forceDraft ? "(This was a Shopify TEST order.)" : "",
-      ],
-      `fulfillment-failed-${order?.id}`,
-    );
   }
 };
