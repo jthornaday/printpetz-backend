@@ -281,6 +281,78 @@ export const cleanSourceFor = async (
 };
 
 /**
+ * What the image editor may work from. Images on our CDN must be the caller's own. For one of the
+ * caller's watermarked (free-credit, still locked) images, the edit runs on the clean original and
+ * `watermark` says the result must be watermarked before the customer sees it — otherwise an AI
+ * restyle could hand back a clean copy. Anything else (an earlier edit's result) is used as given.
+ */
+export const editSourceFor = async (userId: string, imageUrl: string) => {
+  const cdnGenerations = `${AppConstants.cloudfrontDomain}/generations/`;
+  if (!imageUrl.startsWith(cdnGenerations)) {
+    return { url: imageUrl, watermark: false };
+  }
+  const own = `${AppConstants.cloudfrontDomain}/${EUploadPath.GENERATION_IMAGE.replace("[USER_ID]", userId)}/`;
+  if (!imageUrl.startsWith(own)) {
+    return null;
+  }
+  const { data, error } = await supabase
+    .from(tables.generations)
+    .select("id")
+    .eq("user_id", userId)
+    .eq("image", imageUrl)
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    throw new Error(`editor source lookup failed: ${error.message}`);
+  }
+  const generation = data as { id: number } | null;
+  if (!generation) {
+    // One of the caller's own files that isn't a current image (an earlier edit's output).
+    return { url: imageUrl, watermark: false };
+  }
+  const { data: asset, error: assetError } = await supabase
+    .from("generation_assets")
+    .select("original_key, unlocked_at")
+    .eq("generation_id", generation.id)
+    .maybeSingle();
+  if (assetError) {
+    throw new Error(`editor asset lookup failed: ${assetError.message}`);
+  }
+  const a = asset as {
+    original_key: string | null;
+    unlocked_at: string | null;
+  } | null;
+  return a?.original_key && !a.unlocked_at
+    ? {
+        url: `${AppConstants.cloudfrontDomain}/${a.original_key}`,
+        watermark: true,
+      }
+    : { url: imageUrl, watermark: false };
+};
+
+/** Store a watermarked copy of an editor result on our CDN and return its URL. */
+export const storeWatermarkedEdit = async (
+  userId: string,
+  resultUrl: string,
+) => {
+  const res = await fetch(resultUrl);
+  if (!res.ok) {
+    throw new Error(`editor result fetch failed ${res.status}`);
+  }
+  const marked = await watermark(Buffer.from(await res.arrayBuffer()));
+  const isPng = marked[0] === 0x89;
+  const url = await uploadFileToS3({
+    buffer: marked,
+    fileType: isPng ? "image/png" : "image/jpeg",
+    Key: `${EUploadPath.GENERATION_IMAGE.replace("[USER_ID]", userId)}/edits/${Date.now()}_${Math.random().toString(36).slice(2, 10)}.${isPng ? "png" : "jpg"}`,
+  });
+  if (!url) {
+    throw new Error("watermarked edit could not be stored");
+  }
+  return url;
+};
+
+/**
  * Buying credits unlocks the customer's watermarked images (Jake, option b): each one's row is
  * pointed back at its clean original. Runs on every purchase, so an unlock interrupted part-way is
  * finished by the next one. Returns how many images were unlocked.
