@@ -18,6 +18,7 @@ import {
   createFulfillmentOrder, FulfillmentItem, FulfillmentRequest, PrintfulRecipient,
 } from "@/services/printful_service";
 import { addErrorLog } from "@/services/error_logs_service";
+import { sendAlert } from "@/services/alert_service";
 
 type RawBodyRequest = Request & { rawbody?: string };
 
@@ -162,6 +163,18 @@ export const shopifyOrderPaid = async (req: RawBodyRequest, res: Response) => {
       error: JSON.stringify({ message }),
       type: "SHOPIFY_ORDER_UNFULFILLABLE",
     });
+    void sendAlert(
+      `Paid order ${order?.name ?? order?.id} can't be printed`,
+      [
+        `Shopify order ${order?.name ?? ""} (id ${order?.id}) was paid but we could not turn it into a Printful order.`,
+        `Reason: ${message}`,
+        "",
+        "Nothing will print for this customer until someone fixes it. Check the order in Shopify,",
+        "then refund it or fix the cause and replay it (npm run replay-order).",
+        order?.test === true ? "(This was a Shopify TEST order.)" : "",
+      ],
+      `unfulfillable-${order?.id}`,
+    );
     return res.status(200).json({ ok: false, ignored: true, reason: message });
   }
 
@@ -209,5 +222,17 @@ const processFulfillment = async (request: FulfillmentRequest, order: any) => {
       error: JSON.stringify({ message: (error as Error).message }),
       type: "SHOPIFY_FULFILLMENT_FAILED",
     });
+    void sendAlert(
+      `Paid order ${order?.name ?? order?.id} failed to reach Printful`,
+      [
+        `Shopify order ${order?.name ?? ""} (id ${order?.id}) was paid, but creating its Printful order failed.`,
+        `Error: ${(error as Error).message}`,
+        "",
+        "The full request is in error_logs (type SHOPIFY_FULFILLMENT_FAILED) and can be replayed with",
+        "npm run replay-order. Until then nothing prints for this customer.",
+        request.forceDraft ? "(This was a Shopify TEST order.)" : "",
+      ],
+      `fulfillment-failed-${order?.id}`,
+    );
   }
 };

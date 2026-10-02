@@ -96,7 +96,7 @@ const credentialShape = () => {
   ].join(" ");
 };
 
-const printfulFetch = async (
+export const printfulFetch = async (
   path: string,
   init?: RequestInit,
 ): Promise<{ status: number; json: PrintfulResponse }> => {
