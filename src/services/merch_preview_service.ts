@@ -27,6 +27,7 @@ import {
 import { getObjectFromS3, uploadFileToS3 } from "./aws_service";
 import { addErrorLog } from "./error_logs_service";
 import { mockupCalibrationFor, renderMockup } from "./merch_mockup_service";
+import { watermark } from "./watermark_service";
 import {
   personalizationFor,
   planPrintFile,
@@ -146,6 +147,9 @@ const writeManifest = async (m: PreviewManifest) => {
   });
 };
 
+/** Preview inputs: the print options plus whether the customer's copy is watermarked. */
+export type PreviewOptions = PrintOptions & { watermark?: boolean };
+
 const nameSuffix = (e: PreviewEntry) =>
   e.personalization ? `-n${e.personalization.nameKey}` : "";
 
@@ -153,7 +157,7 @@ const renderEntry = async (
   source: Buffer,
   srcSha: string,
   e: PreviewEntry,
-  opts: PrintOptions,
+  opts: PreviewOptions,
 ): Promise<PreviewEntry> => {
   try {
     const plan = await planPrintFile(source, e.productKey, e.treatment, opts);
@@ -162,9 +166,11 @@ const renderEntry = async (
       plan,
       PRINT_PRODUCTS[e.productKey]?.band?.previewWidth ?? PREVIEW_MAX_EDGE,
     );
+    // The product prints clean; only the customer's preview (and so its mockup) is watermarked.
+    const buffer = opts.watermark ? await watermark(p.buffer) : p.buffer;
     const url = await uploadFileToS3({
       Key: `${base(srcSha)}/${e.productKey}-${e.treatment}${nameSuffix(e)}.${p.format === "png" ? "png" : "jpg"}`,
-      buffer: p.buffer,
+      buffer,
       fileType: p.format === "png" ? "image/png" : "image/jpeg",
     });
     if (!url) {
@@ -242,7 +248,7 @@ const running = new Map<string, Promise<void>>();
 const finishInBackground = (
   source: Buffer,
   manifest: PreviewManifest,
-  opts: PrintOptions,
+  opts: PreviewOptions,
 ) => {
   if (running.has(manifest.srcSha)) {
     return;
@@ -294,9 +300,11 @@ const finishInBackground = (
  */
 export const ensurePreviews = async (
   source: Buffer,
-  opts: PrintOptions = {},
+  opts: PreviewOptions = {},
 ): Promise<PreviewManifest> => {
-  const srcSha = sha(source);
+  // Watermarked previews (free-credit images) are a separate set, so unlocking an image switches
+  // the shop to clean previews instead of serving cached watermarked ones.
+  const srcSha = sha(source) + (opts.watermark ? "-wm" : "");
   let manifest = await readManifest(srcSha);
   const newEntry = (
     productKey: string,

@@ -1,5 +1,5 @@
 import AsyncHandler from "@/context/async_handler";
-import { getGenerationById } from "@/services/generation_service";
+import { cleanSourceFor, getGenerationById } from "@/services/generation_service";
 import { getPetNameForPrint } from "@/services/model_service";
 import { ensurePreviews, previewsEnabled } from "@/services/merch_preview_service";
 import errorResponse from "@/utils/errors/errorResponse";
@@ -23,14 +23,16 @@ const getPreviews = AsyncHandler.handle(async (req, res) => {
     throw errorResponse.Api404Error({ errorDescription: "Image not found" });
   }
 
-  // Same URL the order webhook will fetch, so the same bytes, hash and rembg mask.
-  const src = await fetch(generation.image);
-  if (!src.ok) throw new Error(`generation image fetch failed ${src.status}`);
+  // The same clean bytes the order prints, so the same hash and rembg mask. Free-credit images
+  // get watermarked previews; the product itself always prints clean.
+  const { buffer, watermarked } = await cleanSourceFor(generation);
   // Products that print the pet's name (pet bowl) preview the same server-side name the order prints.
   const displayName = await getPetNameForPrint(generation.model_id);
-  const manifest = await ensurePreviews(Buffer.from(await src.arrayBuffer()), { displayName });
+  const manifest = await ensurePreviews(buffer, { displayName, watermark: watermarked });
 
-  res.dataFetchSuccess({ data: { generationId, sourceUrl: generation.image, ...manifest } });
+  res.dataFetchSuccess({
+    data: { generationId, sourceUrl: generation.image, watermarked, ...manifest },
+  });
 });
 
 export { getPreviews };
