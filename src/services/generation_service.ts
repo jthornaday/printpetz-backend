@@ -27,7 +27,7 @@ import { TFalImageGenerationResponse } from "@/types/fal";
 import { EGenerationStatus, IGeneration } from "@/types/generation";
 import errorResponse from "@/utils/errors/errorResponse";
 
-import { uploadFileToS3 } from "./aws_service";
+import { getObjectFromS3, uploadFileToS3 } from "./aws_service";
 import { addErrorLog } from "./error_logs_service";
 import { getFileBufferFromUrl } from "./file_service";
 import { refundCharge } from "./user_service";
@@ -237,6 +237,86 @@ export const customerImageUrl = async (
     );
   }
   return marked;
+};
+
+/**
+ * The clean bytes of a generation, for printing and shop previews, and whether the customer's own
+ * copy is currently watermarked (made with free credits and not yet unlocked by a purchase).
+ * Products always print from these bytes, never from the watermarked copy.
+ */
+export const cleanSourceFor = async (
+  generation: Pick<IGeneration, "id" | "image">,
+) => {
+  const { data, error } = await supabase
+    .from("generation_assets")
+    .select("original_key, unlocked_at")
+    .eq("generation_id", generation.id)
+    .maybeSingle();
+  if (error) {
+    throw new Error(
+      `generation_assets lookup failed for ${generation.id}: ${error.message}`,
+    );
+  }
+  const asset = data as {
+    original_key: string | null;
+    unlocked_at: string | null;
+  } | null;
+  if (asset?.original_key) {
+    const buffer = await getObjectFromS3(asset.original_key);
+    if (!buffer) {
+      throw new Error(`clean original missing for generation ${generation.id}`);
+    }
+    return { buffer, watermarked: !asset.unlocked_at };
+  }
+  if (!generation.image) {
+    throw new Error(`generation ${generation.id} has no image`);
+  }
+  const res = await fetch(generation.image);
+  if (!res.ok) {
+    throw new Error(
+      `generation image fetch failed ${res.status} for ${generation.id}`,
+    );
+  }
+  return { buffer: Buffer.from(await res.arrayBuffer()), watermarked: false };
+};
+
+/**
+ * Buying credits unlocks the customer's watermarked images (Jake, option b): each one's row is
+ * pointed back at its clean original. Runs on every purchase, so an unlock interrupted part-way is
+ * finished by the next one. Returns how many images were unlocked.
+ */
+export const unlockFreeImages = async (userId: string) => {
+  const { data, error } = await supabase
+    .from("generation_assets")
+    .select("generation_id, original_key, generations!inner(user_id)")
+    .eq("generations.user_id", userId)
+    .is("unlocked_at", null)
+    .not("original_key", "is", null);
+  if (error) {
+    throw new Error(`unlock lookup failed for ${userId}: ${error.message}`);
+  }
+  const rows = (data ?? []) as unknown as Array<{
+    generation_id: number;
+    original_key: string;
+  }>;
+  for (const row of rows) {
+    // Point the customer's copy at the clean original first, then mark it unlocked: a crash in
+    // between leaves it clean but still listed, and the next purchase just repeats the update.
+    await updateGeneration({
+      id: row.generation_id,
+      image: `${AppConstants.cloudfrontDomain}/${row.original_key}`,
+    });
+    const { error: markError } = await supabase
+      .from("generation_assets")
+      .update({ unlocked_at: new Date().toISOString() })
+      .eq("generation_id", row.generation_id);
+    if (markError) {
+      throw new Error(
+        `unlock mark failed for ${row.generation_id}: ${markError.message}`,
+      );
+    }
+  }
+  return rows.length;
 };
 
 /**

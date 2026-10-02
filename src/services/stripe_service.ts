@@ -10,6 +10,7 @@ import {
 } from "@/utils/stripe_utils";
 
 import { addErrorLog } from "./error_logs_service";
+import { unlockFreeImages } from "./generation_service";
 import {
   createPrice,
   deletePrice,
@@ -189,4 +190,16 @@ export const handleCheckout = async (
     amount,
     currency: checkoutSessionObject.currency,
   });
+
+  // A purchase unlocks the customer's watermarked starter images. The credits are already theirs,
+  // so a failure here is logged, not thrown; the next purchase retries it.
+  try {
+    await unlockFreeImages(userId);
+  } catch (error) {
+    addErrorLog({
+      input: JSON.stringify({ userId, sessionId: checkoutSessionObject.id }),
+      error: JSON.stringify({ message: (error as Error).message }),
+      type: "UNLOCK_FREE_IMAGES",
+    });
+  }
 };

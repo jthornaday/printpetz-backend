@@ -101,13 +101,14 @@ export const fulfillmentFromShopifyOrder = (order: any): FulfillmentRequest => {
       );
     }
     let treatment = (propOf(li, "treatment") ?? "panel") as Treatment;
+    // Every product prints from the generation's clean original (images made with free credits are
+    // watermarked for the customer, never on the product), so the generation id is required.
+    const gid = Number(propOf(li, "generation_id"));
+    if (!Number.isInteger(gid) || gid <= 0) {
+      throw new UnfulfillableOrderError(`line item ${i} (${productKey}) has no valid generation_id`);
+    }
     if (PRINT_PRODUCTS[productKey]?.band) {
-      // Products that print the pet's name resolve it server-side from the generation, so the
-      // generation id is required. Only the full-scene design exists for them.
-      const gid = Number(propOf(li, "generation_id"));
-      if (!Number.isInteger(gid) || gid <= 0) {
-        throw new UnfulfillableOrderError(`line item ${i} (${productKey}) has no valid generation_id`);
-      }
+      // Only the full-scene design exists for products that print the pet's name.
       if (treatment !== "panel") {
         console.warn("[shopify-webhook] coercing treatment to panel", JSON.stringify({ shopifyOrderId: order?.id, productKey, treatment }));
         treatment = "panel";

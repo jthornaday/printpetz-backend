@@ -12,11 +12,12 @@
  */
 import AppConstants from "@/constants/app_constants";
 import { Treatment } from "@/constants/print_products";
+import { EUploadPath } from "@/types/aws";
 import { variantForProduct } from "@/constants/printful_variants";
 
 import { addErrorLog } from "./error_logs_service";
 import { uploadFileToS3 } from "./aws_service";
-import { getGenerationById } from "./generation_service";
+import { cleanSourceFor, getGenerationById } from "./generation_service";
 import { getPetNameForPrint } from "./model_service";
 import { buildPrintFile, PrintOptions } from "./print_file_service";
 import { PRINT_PRODUCTS } from "@/constants/print_products";
@@ -123,21 +124,22 @@ export const findOrderByExternalId = async (externalId: string) => {
 
 /** Build the print file for one line item and put it somewhere Printful can fetch it. */
 const preparePrintFile = async (item: FulfillmentItem, externalId: string, index: number) => {
-  const res = await fetch(item.sourceImageUrl);
-  if (!res.ok) {
-    throw new Error(`source image fetch failed ${res.status} for ${item.sourceImageUrl}`);
+  // Print the generation itself, from its clean original. The cart's image must be one of the same
+  // customer's images (the customer sees a watermarked copy of free-credit images, at a different
+  // key), so a crafted cart can't print someone else's pet or pet name. Spec: merch-pet-bowl.md
+  // Decision 1; free-credits-watermark.md.
+  const generation = await getGenerationById(Number(item.generationId));
+  const ownerPrefix = generation
+    ? `${AppConstants.cloudfrontDomain}/${EUploadPath.GENERATION_IMAGE.replace("[USER_ID]", generation.user_id)}/`
+    : null;
+  if (!generation || !ownerPrefix || !item.sourceImageUrl.startsWith(ownerPrefix)) {
+    throw new Error(`generation ${item.generationId} does not match the ordered image ${item.sourceImageUrl}`);
   }
-  const source = Buffer.from(await res.arrayBuffer());
+  const { buffer: source } = await cleanSourceFor(generation);
 
-  // Products that print the pet's name look it up here, server-side, from the generation — never
-  // from the cart. The cart's generation id must belong to the cart's image, or a crafted cart
-  // could print another customer's pet name. Spec: merch-pet-bowl.md, Decision 1.
+  // Products that print the pet's name look it up here, server-side — never from the cart.
   const opts: PrintOptions = {};
   if (PRINT_PRODUCTS[item.productKey]?.band) {
-    const generation = await getGenerationById(Number(item.generationId));
-    if (!generation || generation.image !== item.sourceImageUrl) {
-      throw new Error(`generation ${item.generationId} does not match the ordered image ${item.sourceImageUrl}`);
-    }
     opts.displayName = await getPetNameForPrint(generation.model_id);
   }
 
