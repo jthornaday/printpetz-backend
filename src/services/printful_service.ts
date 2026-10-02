@@ -165,9 +165,16 @@ const preparePrintFile = async (item: FulfillmentItem, externalId: string, index
 export const createFulfillmentOrder = async (req: FulfillmentRequest) => {
   const existing = await findOrderByExternalId(req.externalId);
   if (existing) {
+    // Our orders always carry our own print files (print-files/<external id>/...). An order without
+    // them was made by someone else, most likely Printful's Shopify app importing the order by
+    // itself with a generic design. Never treat that as done: the customer's pet wouldn't print.
+    const ours = ((existing.items ?? []) as Array<{ files?: Array<{ url?: string | null }> }>).some((it) =>
+      (it.files ?? []).some((f) => (f.url ?? "").includes(`/${PRINT_FILE_PREFIX}/${req.externalId}/`)),
+    );
     return {
       created: false as const,
-      reason: "already exists for this external id",
+      foreign: !ours,
+      reason: ours ? "already exists for this external id" : "an order without our print files already exists",
       orderId: existing.id,
       status: existing.status,
     };

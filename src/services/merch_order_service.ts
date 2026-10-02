@@ -141,6 +141,29 @@ export const attemptFulfillment = async (row: MerchOrderRow) => {
   }
   try {
     const result = await createFulfillmentOrder(row.request);
+    if ("foreign" in result && result.foreign) {
+      await mark(id, {
+        status: "failed",
+        printful_order_id: result.orderId ?? null,
+        last_error:
+          "Printful already has a non-PrintPetz order for this Shopify order",
+      });
+      await sendAlert(
+        `Order ${row.order_name ?? id} would print WITHOUT the customer's pet`,
+        [
+          `Printful already has order ${result.orderId} (status "${result.status}") for Shopify order ${row.order_name ?? ""} (id ${id}),`,
+          "but it wasn't made by PrintPetz: it doesn't carry our pet print file. Most likely Printful's Shopify app",
+          "imported the order by itself, with a generic design.",
+          "",
+          `1. Cancel it in Printful now if it hasn't started: https://www.printful.com/dashboard?order_id=${result.orderId}`,
+          "2. In Printful, turn off automatic import of Shopify orders for this store.",
+          "3. Ask Claude to resend the order with the customer's pet.",
+          row.test ? "(This was a Shopify TEST order.)" : "",
+        ],
+        `foreign-printful-order-${id}`,
+      );
+      return "failed" as const;
+    }
     const stillWanted = await mark(id, {
       status: "fulfilled",
       printful_order_id: result.orderId ?? null,
