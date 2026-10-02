@@ -5,14 +5,15 @@ import { ImageGenerationFailure } from "@/types/image_provider";
 import { addErrorLog } from "./error_logs_service";
 import {
   claimQueuedGeneration,
+  customerImageUrl,
   findStrandedGenerations,
   providerColumns,
   updateGeneration,
   uploadGenerationImageBuffer,
 } from "./generation_service";
 import { getModelById } from "./model_service";
-import { getStyleById } from "./style_service";
 import { getImageProvider } from "./providers";
+import { getStyleById } from "./style_service";
 import { refundCharge } from "./user_service";
 
 /**
@@ -128,12 +129,31 @@ const processOne = async (generation: IGeneration) => {
       return;
     }
 
-    const imageUrl = await uploadGenerationImageBuffer(
+    const cleanUrl = await uploadGenerationImageBuffer(
       generation.user_id,
       result.image.buffer,
       result.image.contentType,
       result.image.extension,
     );
+    // Free-credit images get a watermarked copy; the row only ever holds the customer's URL. If
+    // that step fails, fail the image now (with its refund) rather than leave it stranded.
+    let imageUrl: string | null = null;
+    if (cleanUrl) {
+      try {
+        imageUrl = await customerImageUrl(generation, {
+          url: cleanUrl,
+          ...result.image,
+        });
+      } catch (error) {
+        addErrorLog({
+          error: JSON.stringify({
+            message: error instanceof Error ? error.message : String(error),
+          }),
+          input: JSON.stringify({ generationId: generation.id }),
+          type: "WATERMARK_STORE",
+        });
+      }
+    }
 
     if (!imageUrl) {
       await failGeneration(
@@ -187,7 +207,9 @@ const processOne = async (generation: IGeneration) => {
  */
 export const sweepStrandedGenerations = async () => {
   const stranded = await findStrandedGenerations(STRANDED_AFTER_MS);
-  if (stranded.length === 0) return 0;
+  if (stranded.length === 0) {
+    return 0;
+  }
 
   for (const generation of stranded) {
     await failGeneration(
@@ -230,7 +252,9 @@ const loop = async () => {
       // Pace from the START of the last call, not the end: a 30-second
       // generation has already spent most of the interval.
       const remaining = MIN_GAP_MS - (Date.now() - startedAt);
-      if (remaining > 0) await sleep(remaining);
+      if (remaining > 0) {
+        await sleep(remaining);
+      }
     } catch (error) {
       // The loop must not be killable by one bad iteration.
       addErrorLog({
@@ -246,7 +270,9 @@ const loop = async () => {
 };
 
 export const startGenerationWorker = () => {
-  if (running) return;
+  if (running) {
+    return;
+  }
   running = true;
 
   // eslint-disable-next-line no-console

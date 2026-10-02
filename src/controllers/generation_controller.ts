@@ -10,6 +10,7 @@ import { getFileBufferFromUrl } from "@/services/file_service";
 import {
   addGeneration,
   countUnfinishedGenerations,
+  customerImageUrl,
   getGenerationById,
   providerColumns,
   updateGeneration,
@@ -397,7 +398,11 @@ const createImage = AsyncHandler.handle(async (req, res) => {
         // The image is in S3, but a customer who cannot see it in History has
         // not received it. The failed insert is in error_logs with its URL, so
         // it can still be recovered by hand.
-        return { billable: generation !== null, generation };
+        return {
+          billable: generation !== null,
+          generation,
+          clean: { url: imageUrl, ...result.image },
+        };
       } catch (error) {
         // A failure the customer did not get an image from is a failure the
         // customer does not pay for -- the same rule as any other AI failure.
@@ -431,12 +436,28 @@ const createImage = AsyncHandler.handle(async (req, res) => {
     }),
   );
 
-  const generations = results.map((result) => result.generation);
   await chargeEach(
     user.id,
     results
       .filter((result) => result.billable)
       .map((result) => result.generation),
+  );
+
+  // This lane saves the image before the charge exists, so the watermark check comes after it.
+  // Rows that used free credits are switched to their watermarked copy before the response.
+  const generations = await Promise.all(
+    results.map(async (result) => {
+      const { generation } = result;
+      if (!generation || !("clean" in result) || !result.clean) {
+        return generation;
+      }
+      const image = await customerImageUrl(generation, result.clean);
+      if (image === result.clean.url) {
+        return generation;
+      }
+      await updateGeneration({ id: generation.id, image });
+      return { ...generation, image };
+    }),
   );
 
   res.dataCreateSuccess({ data: { generations } });
