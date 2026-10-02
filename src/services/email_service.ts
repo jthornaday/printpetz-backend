@@ -11,6 +11,8 @@ interface ISendEmailInput {
   text?: string;
   idempotencyKey?: string;
   tags?: { name: string; value: string }[];
+  /** Where a customer's reply goes (e.g. the support inbox). */
+  replyTo?: string;
 }
 
 const escapeHtml = (value: string) =>
@@ -28,6 +30,7 @@ export const sendEmail = async ({
   text,
   idempotencyKey,
   tags,
+  replyTo,
 }: ISendEmailInput) => {
   const apiKey = process.env.RESEND_API_KEY;
   const from = process.env.EMAIL_FROM ?? process.env.RESEND_FROM_EMAIL;
@@ -65,6 +68,7 @@ export const sendEmail = async ({
         html,
         ...(text ? { text } : {}),
         ...(tags ? { tags } : {}),
+        ...(replyTo ? { reply_to: replyTo } : {}),
       },
       {
         headers: {

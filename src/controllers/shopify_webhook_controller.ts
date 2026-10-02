@@ -20,6 +20,7 @@ import {
 import { addErrorLog } from "@/services/error_logs_service";
 import { sendAlert } from "@/services/alert_service";
 import { attemptFulfillment, recordOrder, recordUnfulfillable } from "@/services/merch_order_service";
+import { handleOrderCancelled, handleRefund } from "@/services/order_tracking_service";
 
 type RawBodyRequest = Request & { rawbody?: string };
 
@@ -206,5 +207,54 @@ export const shopifyOrderPaid = async (req: RawBodyRequest, res: Response) => {
       attempts: 1,
       test: request.forceDraft,
     });
+  }
+};
+
+/** Verify and parse a Shopify webhook; answers 401/400 itself and returns null when it did. */
+const verifiedBody = (req: RawBodyRequest, res: Response): any => {
+  const raw = req.rawbody ?? "";
+  if (!verifyShopifyHmac(raw, req.get("X-Shopify-Hmac-Sha256"))) {
+    res.status(401).json({ error: "invalid signature" });
+    return null;
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    res.status(400).json({ error: "malformed body" });
+    return null;
+  }
+};
+
+/**
+ * POST /webhook/shopify/orders-cancelled: stop the print if Printful hasn't started it, and email
+ * Jake. Handled before answering (Printful replies in about a second), so a failure answers 500
+ * and Shopify retries.
+ */
+export const shopifyOrderCancelled = async (req: RawBodyRequest, res: Response) => {
+  const order = verifiedBody(req, res);
+  if (!order) {
+    return;
+  }
+  try {
+    const outcome = await handleOrderCancelled(order);
+    return res.status(200).json({ ok: true, outcome });
+  } catch (error) {
+    console.error("[shopify-webhook] cancel handling failed", JSON.stringify({ shopifyOrderId: order?.id, message: (error as Error).message }));
+    return res.status(500).json({ error: "cancel handling failed" });
+  }
+};
+
+/** POST /webhook/shopify/refunds-create: email Jake where the print stands (no automatic action). */
+export const shopifyRefundCreated = async (req: RawBodyRequest, res: Response) => {
+  const refund = verifiedBody(req, res);
+  if (!refund) {
+    return;
+  }
+  try {
+    const outcome = await handleRefund(refund);
+    return res.status(200).json({ ok: true, outcome });
+  } catch (error) {
+    console.error("[shopify-webhook] refund handling failed", JSON.stringify({ shopifyOrderId: refund?.order_id, message: (error as Error).message }));
+    return res.status(500).json({ error: "refund handling failed" });
   }
 };

@@ -13,7 +13,11 @@ import supabase from "@/supabase/create_client";
 
 import { sendAlert } from "./alert_service";
 import { addErrorLog } from "./error_logs_service";
-import { createFulfillmentOrder, FulfillmentRequest } from "./printful_service";
+import {
+  cancelOrder,
+  createFulfillmentOrder,
+  FulfillmentRequest,
+} from "./printful_service";
 
 const TABLE = "merch_orders";
 export const MAX_ATTEMPTS = 3;
@@ -81,20 +85,51 @@ export const recordUnfulfillable = async (
   }
 };
 
+/** Update an order unless it has been cancelled. Returns false only when it was cancelled. */
 const mark = async (id: string, fields: Record<string, unknown>) => {
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from(TABLE)
     .update({ ...fields, updated_at: new Date().toISOString() })
-    .eq("shopify_order_id", id);
-  if (error) {
-    // The row stays 'processing' and the sweep revisits it; Printful's external-id lookup then
-    // finds the order already made instead of printing it twice.
-    addErrorLog({
-      input: JSON.stringify({ id, fields }),
-      error: JSON.stringify(error),
-      type: "MERCH_ORDER_MARK",
-    });
+    .eq("shopify_order_id", id)
+    .neq("status", "cancelled")
+    .select("shopify_order_id");
+  if (!error) {
+    return (data ?? []).length > 0;
   }
+  // A failed write leaves the row 'processing' and the sweep revisits it; Printful's external-id
+  // lookup then finds the order already made instead of printing it twice.
+  addErrorLog({
+    input: JSON.stringify({ id, fields }),
+    error: JSON.stringify(error),
+    type: "MERCH_ORDER_MARK",
+  });
+  return true;
+};
+
+/** A Printful order created for an order Shopify had already cancelled: cancel it and say so. */
+const cancelPrintfulForCancelledOrder = async (
+  id: string,
+  orderName: string | null,
+  printfulOrderId: number | null,
+) => {
+  if (!printfulOrderId) {
+    return;
+  }
+  const { ok, status } = await cancelOrder(printfulOrderId);
+  await supabase
+    .from(TABLE)
+    .update({ printful_order_id: printfulOrderId })
+    .eq("shopify_order_id", id);
+  await sendAlert(
+    `Cancelled order ${orderName ?? id}: ${ok ? "print stopped" : "COULD NOT stop the print"}`,
+    [
+      `Shopify order ${orderName ?? ""} (id ${id}) was cancelled while its Printful order ${printfulOrderId} was being created.`,
+      ok
+        ? "We cancelled the Printful order straight away, so nothing will print."
+        : `Cancelling Printful order ${printfulOrderId} failed (status ${status ?? "unknown"}). Cancel it by hand: https://www.printful.com/dashboard?order_id=${printfulOrderId}`,
+    ],
+    `cancel-race-${id}`,
+  );
 };
 
 /** One fulfilment attempt for a claimed order. Never throws. */
@@ -106,11 +141,20 @@ export const attemptFulfillment = async (row: MerchOrderRow) => {
   }
   try {
     const result = await createFulfillmentOrder(row.request);
-    await mark(id, {
+    const stillWanted = await mark(id, {
       status: "fulfilled",
       printful_order_id: result.orderId ?? null,
       last_error: null,
     });
+    if (!stillWanted) {
+      // Shopify cancelled the order while we were making it: undo the Printful order right away.
+      await cancelPrintfulForCancelledOrder(
+        id,
+        row.order_name,
+        result.orderId ?? null,
+      );
+      return "cancelled" as const;
+    }
     console.log(
       "[merch-order] fulfilled",
       JSON.stringify({
