@@ -11,8 +11,10 @@ import {
   addGeneration,
   countUnfinishedGenerations,
   customerImageUrl,
+  editSourceFor,
   getGenerationById,
   providerColumns,
+  storeWatermarkedEdit,
   updateGeneration,
   uploadGenerationImageBuffer,
 } from "@/services/generation_service";
@@ -638,15 +640,33 @@ const editLook = AsyncHandler.handle(async (req, res) => {
     });
   }
 
+  const source = await editSourceFor(req.user.id, imageUrl);
+  if (!source) {
+    throw errorResponse.Api403Error({
+      errorDescription: "You can only edit your own images",
+    });
+  }
+  // "Natural" is the image itself: hand back what the customer already has.
+  if (source.watermark && look === "natural") {
+    res.dataCreateSuccess({ data: { imageUrl } });
+    return;
+  }
+
   // A restyle is not persisted as a generation row, so there is nowhere to
   // record this seed. It only makes a restyle repeatable for a caller who
   // supplies one.
   const editedImageUrl = await handleEditImageLook(
-    imageUrl,
+    source.url,
     look as EditorLook,
     seed,
   );
-  res.dataCreateSuccess({ data: { imageUrl: editedImageUrl } });
+  res.dataCreateSuccess({
+    data: {
+      imageUrl: source.watermark
+        ? await storeWatermarkedEdit(req.user.id, editedImageUrl)
+        : editedImageUrl,
+    },
+  });
 });
 
 const removeBackground = AsyncHandler.handle(async (req, res) => {
@@ -658,7 +678,16 @@ const removeBackground = AsyncHandler.handle(async (req, res) => {
     });
   }
 
-  const imageUrlWithoutBackground = await handleRemoveBackground(imageUrl);
+  const source = await editSourceFor(req.user.id, imageUrl);
+  if (!source) {
+    throw errorResponse.Api403Error({
+      errorDescription: "You can only edit your own images",
+    });
+  }
+  const removed = await handleRemoveBackground(source.url);
+  const imageUrlWithoutBackground = source.watermark
+    ? await storeWatermarkedEdit(req.user.id, removed)
+    : removed;
   res.dataCreateSuccess({ data: { imageUrl: imageUrlWithoutBackground } });
 });
 
