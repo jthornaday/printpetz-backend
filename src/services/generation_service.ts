@@ -31,6 +31,7 @@ import { uploadFileToS3 } from "./aws_service";
 import { addErrorLog } from "./error_logs_service";
 import { getFileBufferFromUrl } from "./file_service";
 import { refundCharge } from "./user_service";
+import { watermark } from "./watermark_service";
 
 // provider and provider_model are labels, added by
 // add-generations-provider-columns.sql. If PRINTPETZ_PROVIDER_COLUMNS is on
@@ -175,6 +176,70 @@ export const deleteGenerationForUser = async (id: number, userId: string) => {
 };
 
 /**
+ * Did this image use free starter credits? Read from its ledger row (credit_ledger is server-only).
+ * If the lookup fails we can't prove it was paid for, so it counts as free and gets watermarked:
+ * the clean original is kept, so a wrong watermark can be undone, a leaked clean image can't.
+ */
+const usedFreeCredits = async (generationId: number) => {
+  const { data, error } = await supabase
+    .from("credit_ledger")
+    .select("free_delta")
+    .eq("kind", "generation")
+    .eq("ref", String(generationId))
+    .maybeSingle();
+  if (error) {
+    addErrorLog({
+      error: JSON.stringify(error),
+      input: JSON.stringify({ generationId }),
+      type: "FREE_CREDIT_LOOKUP",
+    });
+    return true;
+  }
+  return Boolean(data && (data as { free_delta: number }).free_delta < 0);
+};
+
+/**
+ * The URL the customer gets for a finished image. Paid images: the clean upload itself. Images
+ * made with free credits: a watermarked copy at a new key, with the clean original's key recorded
+ * in generation_assets (server-only) so products and the first-purchase unlock can use it. The
+ * clean key is random and never sent to the browser.
+ */
+export const customerImageUrl = async (
+  generation: Pick<IGeneration, "id" | "user_id">,
+  clean: {
+    url: string;
+    buffer: Buffer;
+    contentType: string;
+    extension: string;
+  },
+) => {
+  if (!(await usedFreeCredits(generation.id))) {
+    return clean.url;
+  }
+  const marked = await uploadGenerationImageBuffer(
+    generation.user_id,
+    await watermark(clean.buffer),
+    clean.contentType,
+    clean.extension,
+  );
+  if (!marked) {
+    throw new Error(
+      `watermarked copy of generation ${generation.id} could not be stored`,
+    );
+  }
+  const { error } = await supabase.from("generation_assets").upsert({
+    generation_id: generation.id,
+    original_key: clean.url.replace(`${AppConstants.cloudfrontDomain}/`, ""),
+  });
+  if (error) {
+    throw new Error(
+      `generation_assets write failed for ${generation.id}: ${error.message}`,
+    );
+  }
+  return marked;
+};
+
+/**
  * Upload an image we already hold in memory and return its CloudFront URL.
  *
  * The FAL lane never needs this: fal hands back a URL and
@@ -222,7 +287,9 @@ export const claimQueuedGeneration = async (claimToken: string) => {
   );
 
   const candidate = (candidates as unknown as IGeneration[])?.[0];
-  if (!candidate) return null;
+  if (!candidate) {
+    return null;
+  }
 
   const { data } = await retrySupabase<IGeneration>(
     async () =>
@@ -304,7 +371,15 @@ const handleImageUploadAndSave = async (
     Key: `${EUploadPath.GENERATION_IMAGE.replace("[USER_ID]", generation.user_id)}/${fileName}`,
   };
 
-  const url = await uploadFileToS3(uploadData);
+  const cleanUrl = await uploadFileToS3(uploadData);
+  const url = cleanUrl
+    ? await customerImageUrl(generation, {
+        url: cleanUrl,
+        buffer,
+        contentType: fileType,
+        extension: fileName?.split(".").at(-1) ?? "jpg",
+      })
+    : null;
 
   if (url) {
     // The seed is already recorded at insert time. Only overwrite it if fal
