@@ -7,6 +7,7 @@ dotenv.config({ path: ".env" });
 import app from "./app";
 import AppConstants from "./constants/app_constants";
 import { startGenerationWorker } from "./services/generation_worker";
+import { startPrintfulWatcher } from "./services/printful_watch";
 
 app.listen(AppConstants.port, async () => {
   // eslint-disable-next-line no-console
@@ -18,4 +19,7 @@ app.listen(AppConstants.port, async () => {
   // rollback to fal still drains and sweeps whatever the OpenAI lane left
   // behind, rather than stranding those rows until someone flips back.
   startGenerationWorker();
+
+  // Emails an alert for any Printful order stuck in "failed" or "on hold" (launch checklist A2).
+  startPrintfulWatcher();
 });
