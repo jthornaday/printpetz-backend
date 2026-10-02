@@ -16,6 +16,7 @@ import supabase from "@/supabase/create_client";
 import { sendAlert } from "./alert_service";
 import { sendEmail } from "./email_service";
 import { addErrorLog } from "./error_logs_service";
+import { sendCheckIns } from "./followup_service";
 import {
   cancelOrder,
   FulfillmentRequest,
@@ -344,12 +345,15 @@ export const startShipmentWatcher = () => {
   }
   started = true;
   setInterval(() => {
-    checkShipments().catch((error) =>
-      addErrorLog({
-        input: JSON.stringify({ watcher: "shipments" }),
-        error: JSON.stringify({ message: (error as Error).message }),
-        type: "SHIPMENT_WATCH",
-      }),
-    );
+    // Shipments first, so a package that just shipped has its shipped_at before check-ins run.
+    checkShipments()
+      .then(() => sendCheckIns())
+      .catch((error) =>
+        addErrorLog({
+          input: JSON.stringify({ watcher: "shipments" }),
+          error: JSON.stringify({ message: (error as Error).message }),
+          type: "SHIPMENT_WATCH",
+        }),
+      );
   }, EVERY_MS);
 };
