@@ -7,6 +7,7 @@ dotenv.config({ path: ".env" });
 import app from "./app";
 import AppConstants from "./constants/app_constants";
 import { startGenerationWorker } from "./services/generation_worker";
+import { startOrderSweeper } from "./services/merch_order_service";
 import { startPrintfulWatcher } from "./services/printful_watch";
 
 app.listen(AppConstants.port, async () => {
@@ -22,4 +23,7 @@ app.listen(AppConstants.port, async () => {
 
   // Emails an alert for any Printful order stuck in "failed" or "on hold" (launch checklist A2).
   startPrintfulWatcher();
+
+  // Retries paid Shopify orders left unfinished, e.g. by a restart mid-order (A2, part 2).
+  startOrderSweeper();
 });
