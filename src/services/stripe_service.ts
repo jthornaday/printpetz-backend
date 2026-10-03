@@ -4,19 +4,12 @@ import AppConstants from "@/constants/app_constants";
 import { IPrice } from "@/types/price";
 import { IUser } from "@/types/user";
 import errorResponse from "@/utils/errors/errorResponse";
-import {
-  getStripeEventFromRawBody,
-  priceObjectFromStripeEvent,
-} from "@/utils/stripe_utils";
+import { getStripeEventFromRawBody } from "@/utils/stripe_utils";
 
 import { addErrorLog } from "./error_logs_service";
 import { unlockFreeImages } from "./generation_service";
-import {
-  createPrice,
-  deletePrice,
-  getPriceByPriceId,
-  updatePrice,
-} from "./price_service";
+import { getPriceByPriceId } from "./price_service";
+import { syncPricesFromStripe } from "./price_sync_service";
 import { addPurchase } from "./purchase_service";
 import {
   addPaidCredits,
@@ -92,35 +85,28 @@ export const createCheckoutSession = async (input: CheckoutSessionProps) => {
  * @param rawPayload The raw payload of the event
  * @param sig The signature of the event
  */
+/**
+ * Any price or product change: re-sync every credit pack from Stripe (price_sync_service). A failure
+ * throws, so the webhook answers an error and Stripe retries, instead of a silent half-update.
+ */
 export const handlePriceChange = async (
   rawPayload: string | Buffer,
   sig: string | Buffer | string[],
 ) => {
   const event = getStripeEventFromRawBody(rawPayload, sig, "PRICE_CHANGE");
-
-  // Handle the event
-  switch (event.type) {
-    case "price.created":
-      {
-        const dataToCreate = priceObjectFromStripeEvent(event);
-        await createPrice(dataToCreate);
-      }
-      break;
-    case "price.updated":
-      {
-        const dataToUpdate = priceObjectFromStripeEvent(event);
-        await updatePrice(dataToUpdate);
-      }
-      break;
-    case "price.deleted":
-      {
-        const stripePrice = event.data.object;
-        await deletePrice(stripePrice.id);
-      }
-      break;
-    default:
-      console.log(`Unhandled event type ${event.type}`);
+  if (
+    !event.type.startsWith("price.") &&
+    event.type !== "product.updated" &&
+    event.type !== "product.deleted"
+  ) {
+    console.log(`Unhandled event type ${event.type}`);
+    return;
   }
+  const result = await syncPricesFromStripe(stripe);
+  console.log(
+    "[stripe-prices] synced",
+    JSON.stringify({ event: event.type, ...result }),
+  );
 };
 
 /**
