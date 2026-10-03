@@ -17,7 +17,13 @@ const handleCheckoutSession = AsyncHandler.handle(async (req, res) => {
   // Only active packs from the same Stripe mode as our key: a test-mode price can't be bought with
   // the live key (and vice versa), and an archived pack mustn't be sold.
   const liveKey = AppConstants.stripeKey?.startsWith("sk_live_") ?? false;
-  if (!price || !price.is_active || price.is_test_mode === liveKey) {
+  // A pack without its `credits` metadata would take payment and grant nothing.
+  if (
+    !price ||
+    !price.is_active ||
+    price.is_test_mode === liveKey ||
+    !(price.credits > 0)
+  ) {
     throw errorResponse.Api404Error({
       errorDescription:
         "This credit pack isn't available. Please refresh and choose another.",
