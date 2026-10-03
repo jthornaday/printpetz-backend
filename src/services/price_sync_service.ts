@@ -42,7 +42,10 @@ export const rowForStripePrice = (price: Stripe.Price): PriceRow => {
     currency: price.currency,
     is_active: price.active && (product?.active ?? false) && credits > 0,
     is_test_mode: !price.livemode,
-    is_most_popular: meta.popular === "true",
+    // Typed by hand in the Stripe dashboard: accept true / yes / 1 in any capitals.
+    is_most_popular: ["true", "yes", "1"].includes(
+      (meta.popular ?? "").trim().toLowerCase(),
+    ),
   };
 };
 
