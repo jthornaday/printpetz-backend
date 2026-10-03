@@ -15,7 +15,8 @@
     "merch-demo": "node -r module-alias/register lib/scripts/merch-demo.js",
     "merch-calibrate": "node -r module-alias/register lib/scripts/merch-calibrate.js",
     "bowl-check": "node -r module-alias/register lib/scripts/bowl-check.js",
-    "suppress-email": "node -r module-alias/register lib/scripts/suppress-email.js"
+    "suppress-email": "node -r module-alias/register lib/scripts/suppress-email.js",
+    "sync-prices": "node -r module-alias/register lib/scripts/sync-prices.js"
   },
   "keywords": [
     "Pet",
