@@ -10,9 +10,11 @@
 import { sendEmail } from "./email_service";
 import { addErrorLog } from "./error_logs_service";
 
-const SUPPORT_EMAIL = "myprintpetz@gmail.com";
+// Jake's own inbox. Deliberately NOT the public support address (constants/support.ts), so alerts
+// keep reaching him if that address changes.
+const OWNER_INBOX = "myprintpetz@gmail.com";
 export const alertRecipient = () =>
-  process.env.ALERT_EMAIL?.trim() || SUPPORT_EMAIL;
+  process.env.ALERT_EMAIL?.trim() || OWNER_INBOX;
 
 const escapeHtml = (s: string) =>
   s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");

@@ -1,6 +1,7 @@
 import axios from "axios";
 
 import AppConstants from "@/constants/app_constants";
+import { supportEmail } from "@/constants/support";
 
 import { addErrorLog } from "./error_logs_service";
 
@@ -129,6 +130,7 @@ export const sendModelReadyEmail = async ({
 
   return sendEmail({
     to,
+    replyTo: supportEmail(),
     subject: `${petName} is ready to create!`,
     html: `
       <div style="background:#f6f4ff;padding:40px 16px;font-family:Arial,sans-serif;color:#17151f">
