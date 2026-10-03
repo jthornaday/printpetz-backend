@@ -8,6 +8,7 @@
  * replied "stop" (email_suppressions). Claimed in the database before sending, so several servers
  * can't both send it. Sent only 14:00–23:00 UTC (10am–7pm US Eastern).
  */
+import { supportEmail } from "@/constants/support";
 import supabase from "@/supabase/create_client";
 
 import { sendEmail } from "./email_service";
@@ -17,7 +18,6 @@ import { getPetNameForPrint } from "./model_service";
 import { FulfillmentRequest, printfulFetch } from "./printful_service";
 
 const TABLE = "merch_orders";
-const SUPPORT_EMAIL = "myprintpetz@gmail.com";
 const DAYS_AFTER_SHIPPING = 8;
 /** Past this many days since payment the check-in would land after Judge.me's day-20 request. */
 const TOO_LATE_DAYS = 17;
@@ -237,7 +237,7 @@ export const sendCheckIns = async (now = new Date()) => {
       const ok = await sendEmail({
         to,
         ...checkInEmail(await detailsFor(row)),
-        replyTo: SUPPORT_EMAIL,
+        replyTo: supportEmail(),
         idempotencyKey: `checkin-${row.shopify_order_id}`,
         tags: [{ name: "category", value: "order_checkin" }],
       });

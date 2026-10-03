@@ -11,6 +11,7 @@
  *
  * Shopify test orders never email customers.
  */
+import { supportEmail } from "@/constants/support";
 import supabase from "@/supabase/create_client";
 
 import { sendAlert } from "./alert_service";
@@ -24,7 +25,6 @@ import {
 } from "./printful_service";
 
 const TABLE = "merch_orders";
-const SUPPORT_EMAIL = "myprintpetz@gmail.com";
 const EVERY_MS = 15 * 60_000;
 /** Keep watching an order for further packages for this long after its first shipment. */
 const FOLLOW_SHIPPED_DAYS = 10;
@@ -132,7 +132,7 @@ const notifyShipments = async (row: TrackedOrder) => {
       const ok = await sendEmail({
         to,
         ...mail,
-        replyTo: SUPPORT_EMAIL,
+        replyTo: supportEmail(),
         idempotencyKey: `shipped-${row.printful_order_id}-${s.id}`,
         tags: [{ name: "category", value: "order_shipped" }],
       });
